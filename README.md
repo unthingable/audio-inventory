@@ -4,6 +4,8 @@ Scan, inventory, and track audio plugins and their licenses on macOS.
 
 Walks the standard macOS plugin directories, parses metadata from each bundle (Info.plist, moduleinfo.json, AudioComponents), deduplicates across formats (VST2/VST3/AU/CLAP), and stores everything in a local JSON file. Includes license tracking, bundle/account/source management, and a web UI.
 
+![Audio Inventory web UI](assets/img.png)
+
 ## Install
 
 ```
