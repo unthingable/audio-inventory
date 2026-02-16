@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audio Inventory</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="top-bar">
+    <div class="top-bar__brand">
+      <span class="top-bar__logo">///</span>
+      <h1 class="top-bar__title">Audio Inventory</h1>
+    </div>
+    <div class="top-bar__stats" id="header-stats">
+      <span class="stat" id="stat-total">--</span>
+      <span class="stat-label">products</span>
+      <span class="stat-sep">&middot;</span>
+      <span class="stat" id="stat-vendors">--</span>
+      <span class="stat-label">vendors</span>
+      <span class="stat-sep">&middot;</span>
+      <span class="stat" id="stat-licensed">--</span>
+      <span class="stat-label">licensed</span>
+    </div>
+    <div class="top-bar__actions">
+      <button class="theme-toggle" id="privacy-toggle" title="Toggle privacy mode (hide serial keys)">
+        <svg class="icon-eye" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.5"/></svg>
+        <svg class="icon-eye-off" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.5"/><line x1="2" y1="14" x2="14" y2="2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+      <button class="theme-toggle" id="theme-toggle" title="Toggle light/dark mode">
+        <svg class="icon-sun" width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <svg class="icon-moon" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.5 8.5a5.5 5.5 0 0 1-6-6 5.5 5.5 0 1 0 6 6Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="btn btn--ghost" id="btn-create-product" title="Create a new product manually">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        New
+      </button>
+      <button class="btn btn--ghost" id="btn-manage" title="Manage bundles, accounts, and license managers">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4l6-3 6 3v8l-6 3-6-3V4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M2 4l6 3 6-3M8 7v8" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        Manage
+      </button>
+      <button class="btn btn--ghost" id="btn-scan" title="Re-scan plugin directories">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 0 1 10.5-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M14 8a6 6 0 0 1-10.5 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M12.5 1v3h-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.5 15v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Scan
+      </button>
+      <div class="dropdown" id="export-dropdown">
+        <button class="btn btn--ghost" id="btn-export">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 10v3h10v-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 2v8M5 7l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Export
+        </button>
+        <div class="dropdown__menu" id="export-menu">
+          <a href="/api/export/json" class="dropdown__item">JSON</a>
+          <a href="/api/export/csv" class="dropdown__item">CSV</a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Filter bar -->
+  <div class="filter-bar">
+    <div class="filter-bar__search">
+      <svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14.5 14.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <input type="text" id="search" placeholder="Search plugins..." autocomplete="off" spellcheck="false">
+      <kbd class="search-hint">/</kbd>
+    </div>
+    <div class="filter-bar__selects">
+      <select id="filter-vendor">
+        <option value="">All Vendors</option>
+      </select>
+      <select id="filter-category">
+        <option value="">All Categories</option>
+        <option value="instrument">Instrument</option>
+        <option value="effect">Effect</option>
+        <option value="generator">Generator</option>
+        <option value="sound-pack">Sound Pack</option>
+        <option value="utility">Utility</option>
+        <option value="standalone">Standalone</option>
+        <option value="upgrade">Upgrade</option>
+        <option value="bundle">Bundle</option>
+      </select>
+      <select id="filter-status">
+        <option value="">All Statuses</option>
+        <option value="licensed">Licensed</option>
+        <option value="demo">Demo</option>
+        <option value="free">Free</option>
+        <option value="subscription">Subscription</option>
+        <option value="bundled">Bundled</option>
+        <option value="unknown">Unknown</option>
+      </select>
+      <select id="filter-format">
+        <option value="">All Formats</option>
+        <option value="au">AU</option>
+        <option value="vst3">VST3</option>
+        <option value="vst2">VST2</option>
+        <option value="clap">CLAP</option>
+      </select>
+      <select id="filter-bundle">
+        <option value="">All Bundles</option>
+        <option value="__none__">No Bundle</option>
+      </select>
+      <select id="filter-source">
+        <option value="">All Sources</option>
+        <option value="__none__">No Source</option>
+      </select>
+    </div>
+    <div class="filter-bar__count">
+      <span id="showing-count">--</span> of <span id="total-count">--</span>
+    </div>
+  </div>
+
+  <!-- Bulk actions bar -->
+  <div class="bulk-bar" id="bulk-bar">
+    <span class="bulk-bar__count"><span id="bulk-count">0</span> selected</span>
+    <select id="bulk-status" class="bulk-bar__select">
+      <option value="">Set Status...</option>
+      <option value="licensed">Licensed</option>
+      <option value="demo">Demo</option>
+      <option value="free">Free</option>
+      <option value="subscription">Subscription</option>
+      <option value="bundled">Bundled</option>
+      <option value="unknown">Unknown</option>
+    </select>
+    <select id="bulk-bundle" class="bulk-bar__select">
+      <option value="">Assign Bundle...</option>
+      <option value="__none__">None</option>
+    </select>
+    <select id="bulk-account" class="bulk-bar__select">
+      <option value="">Assign Account...</option>
+      <option value="__none__">None</option>
+    </select>
+    <select id="bulk-lm" class="bulk-bar__select">
+      <option value="">Assign License Manager...</option>
+      <option value="__none__">None</option>
+    </select>
+    <select id="bulk-source" class="bulk-bar__select">
+      <option value="">Assign Source...</option>
+      <option value="__none__">None</option>
+    </select>
+    <button class="btn btn--ghost btn--sm bulk-bar__deselect" id="bulk-deselect">Deselect All</button>
+  </div>
+
+  <!-- Main table -->
+  <div class="table-wrap">
+    <table id="product-table">
+      <thead>
+        <tr>
+          <th class="col-check"><input type="checkbox" id="select-all"></th>
+          <th class="col-name sortable" data-sort="name">Name <span class="sort-arrow"></span></th>
+          <th class="col-vendor sortable" data-sort="vendor">Vendor <span class="sort-arrow"></span></th>
+          <th class="col-category sortable" data-sort="category">Category <span class="sort-arrow"></span></th>
+          <th class="col-formats">Formats</th>
+          <th class="col-status sortable" data-sort="status">Status <span class="sort-arrow"></span></th>
+          <th class="col-installed sortable" data-sort="installed">Inst. <span class="sort-arrow"></span></th>
+          <th class="col-license">License</th>
+          <th class="col-version sortable" data-sort="version">Version <span class="sort-arrow"></span></th>
+        </tr>
+      </thead>
+      <tbody id="product-tbody">
+        <tr class="loading-row"><td colspan="9">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Detail drawer (slides in from right) -->
+  <div class="drawer-overlay" id="drawer-overlay"></div>
+  <aside class="drawer" id="drawer">
+    <div class="drawer__header">
+      <button class="drawer__close" id="drawer-close">&times;</button>
+      <h2 class="drawer__title" id="drawer-title"></h2>
+      <span class="drawer__vendor" id="drawer-vendor"></span>
+    </div>
+    <div class="drawer__body" id="drawer-body">
+      <!-- populated by JS -->
+    </div>
+  </aside>
+
+  <!-- Scan progress overlay -->
+  <div class="scan-overlay" id="scan-overlay">
+    <div class="scan-modal">
+      <div class="scan-spinner"></div>
+      <p>Scanning plugin directories...</p>
+    </div>
+  </div>
+
+  <!-- Management overlay -->
+  <div class="manage-overlay" id="manage-overlay">
+    <div class="manage-modal">
+      <div class="manage-modal__header">
+        <div class="entity-tabs">
+          <button class="entity-tab active" data-tab="bundles">Bundles</button>
+          <button class="entity-tab" data-tab="accounts">Accounts</button>
+          <button class="entity-tab" data-tab="managers">License Managers</button>
+          <button class="entity-tab" data-tab="sources">Sources</button>
+        </div>
+        <button class="drawer__close" id="manage-close">&times;</button>
+      </div>
+      <div class="manage-modal__body">
+        <!-- Bundles tab -->
+        <div class="entity-tab-content active" data-tab-content="bundles">
+          <div class="entity-list-panel" id="bundle-list-panel">
+            <button class="btn btn--accent" id="bundle-create-btn">Create Bundle</button>
+            <div class="entity-list" id="bundle-list"></div>
+          </div>
+          <div class="entity-detail-panel" id="bundle-detail-panel">
+            <div class="entity-detail-empty" id="bundle-detail-empty">
+              <p class="no-data">Select a bundle or create a new one</p>
+            </div>
+            <div class="entity-detail-form" id="bundle-detail-form" style="display:none"></div>
+          </div>
+        </div>
+        <!-- Accounts tab -->
+        <div class="entity-tab-content" data-tab-content="accounts">
+          <div class="entity-list-panel" id="account-list-panel">
+            <button class="btn btn--accent" id="account-create-btn">Create Account</button>
+            <div class="entity-list" id="account-list"></div>
+          </div>
+          <div class="entity-detail-panel" id="account-detail-panel">
+            <div class="entity-detail-empty" id="account-detail-empty">
+              <p class="no-data">Select an account or create a new one</p>
+            </div>
+            <div class="entity-detail-form" id="account-detail-form" style="display:none"></div>
+          </div>
+        </div>
+        <!-- License Managers tab -->
+        <div class="entity-tab-content" data-tab-content="managers">
+          <div class="entity-list-panel" id="lm-list-panel">
+            <button class="btn btn--accent" id="lm-create-btn">Create License Manager</button>
+            <div class="entity-list" id="lm-list"></div>
+          </div>
+          <div class="entity-detail-panel" id="lm-detail-panel">
+            <div class="entity-detail-empty" id="lm-detail-empty">
+              <p class="no-data">Select a license manager or create a new one</p>
+            </div>
+            <div class="entity-detail-form" id="lm-detail-form" style="display:none"></div>
+          </div>
+        </div>
+        <!-- Sources tab -->
+        <div class="entity-tab-content" data-tab-content="sources">
+          <div class="entity-list-panel" id="source-list-panel">
+            <button class="btn btn--accent" id="source-create-btn">Create Source</button>
+            <div class="entity-list" id="source-list"></div>
+          </div>
+          <div class="entity-detail-panel" id="source-detail-panel">
+            <div class="entity-detail-empty" id="source-detail-empty">
+              <p class="no-data">Select a source or create a new one</p>
+            </div>
+            <div class="entity-detail-form" id="source-detail-form" style="display:none"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status popover (inline editing) -->
+  <div class="status-popover" id="status-popover">
+    <button class="status-popover__opt" data-status="licensed">licensed</button>
+    <button class="status-popover__opt" data-status="demo">demo</button>
+    <button class="status-popover__opt" data-status="free">free</button>
+    <button class="status-popover__opt" data-status="subscription">subscription</button>
+    <button class="status-popover__opt" data-status="bundled">bundled</button>
+    <button class="status-popover__opt" data-status="unknown">unknown</button>
+  </div>
+
+  <!-- License popover (quick-add from table) -->
+  <div class="license-popover" id="license-popover"></div>
+
+  <!-- Create Product modal -->
+  <div class="manage-overlay" id="create-product-overlay">
+    <div class="manage-modal" style="width:420px;height:auto;max-height:85vh">
+      <div class="manage-modal__header" style="padding:var(--space-lg)">
+        <h2>Create Product</h2>
+        <button class="drawer__close" id="create-product-close">&times;</button>
+      </div>
+      <div style="padding:var(--space-lg)">
+        <div class="entity-form-fields" id="create-product-form">
+          <div class="entity-form-field">
+            <label class="license-field__label">Name *</label>
+            <input type="text" class="license-input" id="cp-name" placeholder="Plugin name" spellcheck="false">
+          </div>
+          <div class="entity-form-field">
+            <label class="license-field__label">Vendor</label>
+            <input type="text" class="license-input" id="cp-vendor" placeholder="Vendor name" spellcheck="false">
+          </div>
+          <div class="entity-form-field">
+            <label class="license-field__label">Category</label>
+            <select class="license-input" id="cp-category" style="appearance:auto">
+              <option value="">--</option>
+              <option value="instrument">instrument</option>
+              <option value="effect">effect</option>
+              <option value="generator">generator</option>
+              <option value="sound-pack">sound-pack</option>
+              <option value="utility">utility</option>
+              <option value="standalone">standalone</option>
+              <option value="upgrade">upgrade</option>
+              <option value="bundle">bundle</option>
+            </select>
+          </div>
+          <div class="entity-form-field">
+            <label class="license-field__label">Status</label>
+            <select class="license-input" id="cp-status" style="appearance:auto">
+              <option value="unknown">unknown</option>
+              <option value="licensed">licensed</option>
+              <option value="demo">demo</option>
+              <option value="free">free</option>
+              <option value="subscription">subscription</option>
+              <option value="bundled">bundled</option>
+            </select>
+          </div>
+        </div>
+        <div class="entity-form-actions">
+          <button class="btn--accent btn--sm" id="cp-submit">Create</button>
+          <button class="btn btn--ghost btn--sm" id="cp-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

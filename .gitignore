@@ -1,0 +1,10 @@
+data/
+.venv/
+__pycache__/
+*.egg-info/
+dist/
+build/
+.ruff_cache/
+*.pyc
+CLAUDE.md
+.claude/

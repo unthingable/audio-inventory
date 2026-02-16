@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "audio-inventory"
+version = "0.1.0"
+description = "Inventory, track, and manage audio plugins and their licenses"
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.1",
+    "rich>=13.0",
+    "flask>=3.0",
+]
+
+[project.scripts]
+audio-inventory = "audio_inventory.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
