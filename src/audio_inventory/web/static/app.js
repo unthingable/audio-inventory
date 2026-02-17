@@ -421,14 +421,148 @@
   let _licPopoverFetchId = 0;
   let privacyMode = false;
 
+  class FilterDropdown {
+    constructor(container, label, options, onChange) {
+      this._container = container;
+      this._label = label;
+      this._options = options;
+      this._selected = new Set();
+      this._onChange = onChange;
+      this._render();
+      this._bind();
+    }
+
+    get values() {
+      return this._selected;
+    }
+
+    _render() {
+      this._container.innerHTML = "";
+
+      this._button = document.createElement("button");
+      this._button.type = "button";
+      this._button.className = "filter-dropdown__btn";
+      this._button.textContent = "All " + this._label;
+      this._container.appendChild(this._button);
+
+      this._menu = document.createElement("div");
+      this._menu.className = "filter-dropdown__menu";
+      this._container.appendChild(this._menu);
+
+      this._renderMenu();
+    }
+
+    _renderMenu() {
+      this._menu.innerHTML = "";
+
+      const allItem = document.createElement("div");
+      allItem.className = "filter-dropdown__item";
+      if (this._selected.size === 0) allItem.classList.add("filter-dropdown__item--checked");
+      const allCheck = document.createElement("span");
+      allCheck.className = "filter-dropdown__check";
+      allCheck.textContent = this._selected.size === 0 ? "\u2713" : "";
+      allItem.appendChild(allCheck);
+      const allText = document.createElement("span");
+      allText.className = "filter-dropdown__item-text";
+      allText.textContent = "All " + this._label;
+      allItem.appendChild(allText);
+      allItem.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._selected.clear();
+        this._updateUI();
+        this._onChange();
+      });
+      this._menu.appendChild(allItem);
+
+      const sep = document.createElement("div");
+      sep.className = "filter-dropdown__sep";
+      this._menu.appendChild(sep);
+
+      this._options.forEach((opt) => {
+        const item = document.createElement("div");
+        item.className = "filter-dropdown__item";
+        const isChecked = this._selected.has(opt.value);
+        if (isChecked) item.classList.add("filter-dropdown__item--checked");
+
+        const check = document.createElement("span");
+        check.className = "filter-dropdown__check";
+        check.textContent = isChecked ? "\u2713" : "";
+        item.appendChild(check);
+
+        const text = document.createElement("span");
+        text.className = "filter-dropdown__item-text";
+        text.textContent = opt.text;
+        item.appendChild(text);
+
+        item.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (this._selected.has(opt.value)) {
+            this._selected.delete(opt.value);
+          } else {
+            this._selected.add(opt.value);
+          }
+          this._updateUI();
+          this._onChange();
+        });
+        this._menu.appendChild(item);
+      });
+    }
+
+    _updateUI() {
+      if (this._selected.size === 0) {
+        this._button.textContent = "All " + this._label;
+      } else if (this._selected.size === 1) {
+        const val = [...this._selected][0];
+        const opt = this._options.find((o) => o.value === val);
+        this._button.textContent = opt ? opt.text : val;
+      } else {
+        this._button.textContent = this._selected.size + " selected";
+      }
+
+      this._button.classList.toggle("active", this._selected.size > 0);
+
+      const items = this._menu.querySelectorAll(".filter-dropdown__item");
+      items[0].classList.toggle("filter-dropdown__item--checked", this._selected.size === 0);
+      items[0].querySelector(".filter-dropdown__check").textContent =
+        this._selected.size === 0 ? "\u2713" : "";
+
+      for (let i = 1; i < items.length; i++) {
+        const optValue = this._options[i - 1].value;
+        const checked = this._selected.has(optValue);
+        items[i].classList.toggle("filter-dropdown__item--checked", checked);
+        items[i].querySelector(".filter-dropdown__check").textContent = checked ? "\u2713" : "";
+      }
+    }
+
+    _bind() {
+      this._button.addEventListener("click", (e) => {
+        e.stopPropagation();
+        document.querySelectorAll(".filter-dropdown__menu.open").forEach((m) => {
+          if (m !== this._menu) m.classList.remove("open");
+        });
+        this._menu.classList.toggle("open");
+      });
+    }
+
+    setOptions(options) {
+      const validValues = new Set(options.map((o) => o.value));
+      for (const val of this._selected) {
+        if (!validValues.has(val)) this._selected.delete(val);
+      }
+      this._options = options;
+      this._renderMenu();
+      this._updateUI();
+    }
+  }
+
+  document.addEventListener("click", () => {
+    document.querySelectorAll(".filter-dropdown__menu.open").forEach((m) => {
+      m.classList.remove("open");
+    });
+  });
+
   // DOM refs
   const searchInput = document.getElementById("search");
-  const filterVendor = document.getElementById("filter-vendor");
-  const filterCategory = document.getElementById("filter-category");
-  const filterStatus = document.getElementById("filter-status");
-  const filterFormat = document.getElementById("filter-format");
-  const filterBundle = document.getElementById("filter-bundle");
-  const filterSource = document.getElementById("filter-source");
   const tbody = document.getElementById("product-tbody");
   const showingCount = document.getElementById("showing-count");
   const totalCount = document.getElementById("total-count");
@@ -449,6 +583,57 @@
   const manageOverlay = document.getElementById("manage-overlay");
   const btnCreateProduct = document.getElementById("btn-create-product");
   const createProductOverlay = document.getElementById("create-product-overlay");
+
+  // Filter dropdowns (multi-select)
+  const filterVendor = new FilterDropdown(
+    document.getElementById("filter-vendor"), "Vendors", [], applyFilters
+  );
+  const filterCategory = new FilterDropdown(
+    document.getElementById("filter-category"), "Categories",
+    [
+      { value: "instrument", text: "Instrument" },
+      { value: "effect", text: "Effect" },
+      { value: "generator", text: "Generator" },
+      { value: "sound-pack", text: "Sound Pack" },
+      { value: "utility", text: "Utility" },
+      { value: "standalone", text: "Standalone" },
+      { value: "upgrade", text: "Upgrade" },
+      { value: "bundle", text: "Bundle" },
+    ],
+    applyFilters
+  );
+  const filterStatus = new FilterDropdown(
+    document.getElementById("filter-status"), "Statuses",
+    [
+      { value: "licensed", text: "Licensed" },
+      { value: "demo", text: "Demo" },
+      { value: "free", text: "Free" },
+      { value: "subscription", text: "Subscription" },
+      { value: "bundled", text: "Bundled" },
+      { value: "unknown", text: "Unknown" },
+    ],
+    applyFilters
+  );
+  const filterFormat = new FilterDropdown(
+    document.getElementById("filter-format"), "Formats",
+    [
+      { value: "au", text: "AU" },
+      { value: "vst3", text: "VST3" },
+      { value: "vst2", text: "VST2" },
+      { value: "clap", text: "CLAP" },
+    ],
+    applyFilters
+  );
+  const filterBundle = new FilterDropdown(
+    document.getElementById("filter-bundle"), "Bundles",
+    [{ value: "__none__", text: "No Bundle" }],
+    applyFilters
+  );
+  const filterSource = new FilterDropdown(
+    document.getElementById("filter-source"), "Sources",
+    [{ value: "__none__", text: "No Source" }],
+    applyFilters
+  );
 
   // ---- Init ----
 
@@ -520,30 +705,22 @@
     const sorted = [...vendors].sort((a, b) =>
       a.localeCompare(b, undefined, { sensitivity: "base" })
     );
-
-    const current = filterVendor.value;
-    filterVendor.innerHTML = '<option value="">All Vendors</option>';
-    sorted.forEach((v) => {
+    const options = sorted.map((v) => {
       const count = allProducts.filter((p) => p.vendor === v).length;
-      const opt = document.createElement("option");
-      opt.value = v;
-      opt.textContent = `${v} (${count})`;
-      filterVendor.appendChild(opt);
+      return { value: v, text: `${v} (${count})` };
     });
-    filterVendor.value = current;
+    filterVendor.setOptions(options);
   }
 
   function populateBundleFilter() {
-    const current = filterBundle.value;
-    filterBundle.innerHTML =
-      '<option value="">All Bundles</option><option value="__none__">No Bundle</option>';
+    const options = [{ value: "__none__", text: "No Bundle" }];
     allBundles.forEach((bundle) => {
-      const opt = document.createElement("option");
-      opt.value = String(bundle.id);
-      opt.textContent = `${bundle.name} (${bundle.product_count})`;
-      filterBundle.appendChild(opt);
+      options.push({
+        value: String(bundle.id),
+        text: `${bundle.name} (${bundle.product_count})`,
+      });
     });
-    filterBundle.value = current;
+    filterBundle.setOptions(options);
   }
 
   function populateBulkSelect(elementId, label, items) {
@@ -561,16 +738,14 @@
   }
 
   function populateSourceFilter() {
-    const current = filterSource.value;
-    filterSource.innerHTML =
-      '<option value="">All Sources</option><option value="__none__">No Source</option>';
+    const options = [{ value: "__none__", text: "No Source" }];
     allSources.forEach((source) => {
-      const opt = document.createElement("option");
-      opt.value = String(source.id);
-      opt.textContent = `${source.name} (${source.product_count})`;
-      filterSource.appendChild(opt);
+      options.push({
+        value: String(source.id),
+        text: `${source.name} (${source.product_count})`,
+      });
     });
-    filterSource.value = current;
+    filterSource.setOptions(options);
   }
 
   function updateStats() {
@@ -586,39 +761,34 @@
 
   // ---- Filtering ----
 
+  function matchesNoneOrId(selected, id) {
+    if (selected.has("__none__") && !id) return true;
+    return selected.has(String(id));
+  }
+
   function applyFilters() {
     lastSelectedIndex = -1;
     const query = searchInput.value.toLowerCase().trim();
-    const vendor = filterVendor.value;
-    const category = filterCategory.value;
-    const status = filterStatus.value;
-    const format = filterFormat.value;
-    const bundle = filterBundle.value;
-    const source = filterSource.value;
+    const vendors = filterVendor.values;
+    const categories = filterCategory.values;
+    const statuses = filterStatus.values;
+    const formats = filterFormat.values;
+    const bundles = filterBundle.values;
+    const sources = filterSource.values;
 
     filteredProducts = allProducts.filter((p) => {
       if (query) {
         const haystack = `${p.name} ${p.vendor}`.toLowerCase();
         if (!haystack.includes(query)) return false;
       }
-      if (vendor && p.vendor !== vendor) return false;
-      if (category && p.category !== category) return false;
-      if (status && p.status !== status) return false;
-      if (format && !p.formats.includes(format)) return false;
-      if (bundle === "__none__" && p.bundle_id) return false;
-      if (bundle && bundle !== "__none__" && String(p.bundle_id) !== bundle) return false;
-      if (source === "__none__" && p.source_id) return false;
-      if (source && source !== "__none__" && String(p.source_id) !== source) return false;
+      if (vendors.size > 0 && !vendors.has(p.vendor)) return false;
+      if (categories.size > 0 && !categories.has(p.category)) return false;
+      if (statuses.size > 0 && !statuses.has(p.status)) return false;
+      if (formats.size > 0 && !p.formats.some((f) => formats.has(f))) return false;
+      if (bundles.size > 0 && !matchesNoneOrId(bundles, p.bundle_id)) return false;
+      if (sources.size > 0 && !matchesNoneOrId(sources, p.source_id)) return false;
       return true;
     });
-
-    // Highlight active filters
-    filterVendor.classList.toggle("active", !!vendor);
-    filterCategory.classList.toggle("active", !!category);
-    filterStatus.classList.toggle("active", !!status);
-    filterFormat.classList.toggle("active", !!format);
-    filterBundle.classList.toggle("active", !!bundle);
-    filterSource.classList.toggle("active", !!source);
 
     sortProducts();
     renderTable();
@@ -2159,14 +2329,8 @@
   // ---- Event Binding ----
 
   function bindEvents() {
-    // Filters
+    // Filters (dropdown change callbacks are wired in FilterDropdown constructor)
     searchInput.addEventListener("input", applyFilters);
-    filterVendor.addEventListener("change", applyFilters);
-    filterCategory.addEventListener("change", applyFilters);
-    filterStatus.addEventListener("change", applyFilters);
-    filterFormat.addEventListener("change", applyFilters);
-    filterBundle.addEventListener("change", applyFilters);
-    filterSource.addEventListener("change", applyFilters);
 
     // Sort
     document.querySelectorAll("thead th.sortable").forEach((th) => {
@@ -2350,6 +2514,8 @@
           closeBundleOverlay();
         } else if (drawer.classList.contains("open")) {
           closeDrawer();
+        } else if (document.querySelector(".filter-dropdown__menu.open")) {
+          document.querySelectorAll(".filter-dropdown__menu.open").forEach((m) => m.classList.remove("open"));
         } else if (document.activeElement === searchInput) {
           searchInput.blur();
         }

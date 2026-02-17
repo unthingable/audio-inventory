@@ -69,44 +69,12 @@
       <kbd class="search-hint">/</kbd>
     </div>
     <div class="filter-bar__selects">
-      <select id="filter-vendor">
-        <option value="">All Vendors</option>
-      </select>
-      <select id="filter-category">
-        <option value="">All Categories</option>
-        <option value="instrument">Instrument</option>
-        <option value="effect">Effect</option>
-        <option value="generator">Generator</option>
-        <option value="sound-pack">Sound Pack</option>
-        <option value="utility">Utility</option>
-        <option value="standalone">Standalone</option>
-        <option value="upgrade">Upgrade</option>
-        <option value="bundle">Bundle</option>
-      </select>
-      <select id="filter-status">
-        <option value="">All Statuses</option>
-        <option value="licensed">Licensed</option>
-        <option value="demo">Demo</option>
-        <option value="free">Free</option>
-        <option value="subscription">Subscription</option>
-        <option value="bundled">Bundled</option>
-        <option value="unknown">Unknown</option>
-      </select>
-      <select id="filter-format">
-        <option value="">All Formats</option>
-        <option value="au">AU</option>
-        <option value="vst3">VST3</option>
-        <option value="vst2">VST2</option>
-        <option value="clap">CLAP</option>
-      </select>
-      <select id="filter-bundle">
-        <option value="">All Bundles</option>
-        <option value="__none__">No Bundle</option>
-      </select>
-      <select id="filter-source">
-        <option value="">All Sources</option>
-        <option value="__none__">No Source</option>
-      </select>
+      <div class="filter-dropdown" id="filter-vendor"></div>
+      <div class="filter-dropdown" id="filter-category"></div>
+      <div class="filter-dropdown" id="filter-status"></div>
+      <div class="filter-dropdown" id="filter-format"></div>
+      <div class="filter-dropdown" id="filter-bundle"></div>
+      <div class="filter-dropdown" id="filter-source"></div>
     </div>
     <div class="filter-bar__count">
       <span id="showing-count">--</span> of <span id="total-count">--</span>
