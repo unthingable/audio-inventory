@@ -10,7 +10,6 @@
     { key: "serial_key", label: "Key", type: "text" },
     { key: "email", label: "Email", type: "email" },
     { key: "source", label: "Source", type: "text" },
-    { key: "license_manager", label: "Manager", type: "text" },
     { key: "purchase_date", label: "Purchased", type: "text", placeholder: "YYYY-MM-DD" },
     { key: "vendor_url", label: "Account", type: "url" },
     { key: "license_file_path", label: "File", type: "text" },
@@ -1148,7 +1147,6 @@
   const CORE_LICENSE_FIELDS = [
     { key: "serial_key", label: "Key", type: "text" },
     { key: "email", label: "Email", type: "email" },
-    { key: "license_manager", label: "Manager", type: "text" },
   ];
 
   const EXTRA_LICENSE_FIELDS = [
@@ -1269,12 +1267,18 @@
     const fields = [
       { key: "serial_key", label: "Key" },
       { key: "email", label: "Email" },
-      { key: "license_manager", label: "Manager" },
       { key: "source", label: "Source" },
       { key: "purchase_date", label: "Purchased" },
     ];
 
     let hasAny = false;
+
+    const mgrName = product.license_manager_name || lic.license_manager;
+    if (mgrName) {
+      html += `<dt>Manager</dt><dd>${esc(mgrName)}</dd>`;
+      hasAny = true;
+    }
+
     fields.forEach((f) => {
       if (lic[f.key]) {
         let val = lic[f.key];
@@ -1463,6 +1467,7 @@
     if (product.installations.length === 0) {
       html += '<p class="no-data">No installations found</p>';
     } else {
+      const canSplit = product.installations.length >= 2;
       product.installations.forEach((inst) => {
         const removed = inst.is_present
           ? ""
@@ -1474,6 +1479,9 @@
         html += `<span class="install-card__format" style="color: ${fmtColor}">${inst.format.toUpperCase()}</span>`;
         html += `<span class="install-card__version">v${esc(inst.version) || "?"}</span>`;
         html += removed;
+        if (canSplit && !product._synthetic && !mergeMode) {
+          html += ` <button class="btn btn--ghost btn--xs split-install-btn" data-product-id="${product.id}" data-path="${esc(inst.path)}">Split</button>`;
+        }
         html += "</div>";
         html += '<div class="install-card__detail">';
         html += esc(inst.path);
@@ -1496,7 +1504,7 @@
       html += '<p class="no-data" id="no-licenses-msg">No license info recorded</p>';
     } else {
       product.licenses.forEach((lic) => {
-        html += renderLicenseCard(lic);
+        html += renderLicenseCard(lic, product.license_manager_name);
       });
     }
 
@@ -1531,10 +1539,19 @@
     bindEntityPickers(product);
     // Bind license handlers
     bindLicenseHandlers(product);
+    // Bind split installation handlers
+    bindSplitHandlers(product);
   }
 
-  function renderLicenseCard(lic) {
+  function renderLicenseCard(lic, productLicenseManagerName) {
     let html = `<div class="license-card" data-license-id="${lic.id}">`;
+    const mgrName = productLicenseManagerName || lic.license_manager;
+    if (mgrName) {
+      html += '<div class="license-edit-field">';
+      html += '<label class="license-field__label">Manager</label>';
+      html += `<span class="license-field__readonly">${esc(mgrName)}</span>`;
+      html += "</div>";
+    }
     LICENSE_FIELDS.forEach((f) => {
       const inputType = (SENSITIVE_FIELDS.has(f.key) && privacyMode) ? "password" : f.type;
       html += '<div class="license-edit-field">';
@@ -1758,7 +1775,7 @@
           const res = await fetch(`/api/licenses/${licId}`, { method: "DELETE" });
           if (res.ok) {
             card.remove();
-            toast("License deleted", "success");
+            toast("License deleted", "success", undoAction());
             // Show "no licenses" if empty
             if (!container.querySelector(".license-card")) {
               container.innerHTML = '<p class="no-data" id="no-licenses-msg">No license info recorded</p>';
@@ -1820,6 +1837,33 @@
         addBtn.style.display = "none";
       });
     }
+  }
+
+  function bindSplitHandlers(product) {
+    drawerBody.querySelectorAll(".split-install-btn").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const path = btn.dataset.path;
+        try {
+          const res = await fetch(`/api/products/${product.id}/split`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ installation_path: path }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            toast(`Split into new product: ${data.new_product.name}`, "success");
+            await loadProducts();
+            openDrawer(product.id);
+          } else {
+            const err = await res.json();
+            toast(err.error || "Split failed", "error");
+          }
+        } catch {
+          toast("Network error", "error");
+        }
+      });
+    });
   }
 
   function closeDrawer() {
@@ -2044,11 +2088,13 @@
     });
 
     document.getElementById(`${prefix}-delete-btn`).addEventListener("click", async () => {
-      if (!confirm(`Delete ${cfg.label.toLowerCase()} "${entity.name}"? Products will be unlinked.`)) return;
+      const productCount = entity.products ? entity.products.length : 0;
+      const unlinkMsg = productCount > 0 ? ` This will unlink ${productCount} product${productCount === 1 ? "" : "s"}.` : "";
+      if (!confirm(`Delete ${cfg.label.toLowerCase()} "${entity.name}"?${unlinkMsg}`)) return;
       try {
         const res = await fetch(`${cfg.apiEndpoint}/${entity.id}`, { method: "DELETE" });
         if (res.ok) {
-          toast(`${cfg.label} deleted`, "success");
+          toast(`${cfg.label} deleted`, "success", undoAction());
           cfg.selectedId = null;
           await Promise.all([loadProducts(), renderEntityMgmtList(cfg)]);
           showEntityMgmtDetailEmpty(cfg);
@@ -2326,6 +2372,26 @@
     }, action ? 6000 : 3000);
   }
 
+  function undoAction() {
+    return {
+      label: "Undo",
+      onClick: async () => {
+        try {
+          const res = await fetch("/api/undo", { method: "POST" });
+          if (res.ok) {
+            await Promise.all([loadProducts(), loadBundles(), loadAccounts(), loadLicenseManagers(), loadSources()]);
+            if (selectedProductId) openDrawer(selectedProductId);
+            toast("Undone", "success");
+          } else {
+            toast("Undo failed", "error");
+          }
+        } catch {
+          toast("Undo failed", "error");
+        }
+      },
+    };
+  }
+
   // ---- Event Binding ----
 
   function bindEvents() {
@@ -2382,7 +2448,34 @@
           });
           updateStats();
           applyFilters();
-          toast(`Updated ${ids.length} products`, "success");
+          toast(`Updated ${ids.length} products`, "success", undoAction());
+        } else {
+          toast("Bulk update failed", "error");
+        }
+      } catch {
+        toast("Network error", "error");
+      }
+    });
+
+    document.getElementById("bulk-category").addEventListener("change", async (e) => {
+      const category = e.target.value;
+      if (!category) return;
+      e.target.value = "";
+      const ids = [...selectedProductIds];
+      try {
+        const res = await fetch("/api/products/bulk", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ product_ids: ids, category }),
+        });
+        if (res.ok) {
+          ids.forEach((id) => {
+            const p = allProducts.find((p) => p.id === id);
+            if (p) p.category = category;
+          });
+          updateStats();
+          applyFilters();
+          toast(`Updated ${ids.length} products`, "success", undoAction());
         } else {
           toast("Bulk update failed", "error");
         }
@@ -2425,7 +2518,7 @@
             });
             applyFilters();
             await cfg.reloadFn();
-            toast(isNone ? `Cleared ${cfg.label} from ${ids.length} products` : `Assigned ${ids.length} products to ${cfg.label}`, "success");
+            toast(isNone ? `Cleared ${cfg.label} from ${ids.length} products` : `Assigned ${ids.length} products to ${cfg.label}`, "success", undoAction());
           } else {
             toast("Bulk update failed", "error");
           }
@@ -2810,7 +2903,7 @@
       closeMergeMode();
       clearSelection();
       await Promise.all([loadProducts(), loadBundles(), loadAccounts(), loadLicenseManagers(), loadSources()]);
-      toast(`Merged ${others.length + 1} products`, "success");
+      toast(`Merged ${others.length + 1} products`, "success", undoAction());
     } catch {
       toast("Merge failed", "error");
     } finally {

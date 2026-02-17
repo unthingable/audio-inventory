@@ -291,11 +291,51 @@ def api_merge_products():
     except (TypeError, ValueError):
         db.close()
         return jsonify({"error": "keep_id and remove_id are required as integers"}), 400
+    keep = db.get_product(keep_id)
+    remove = db.get_product(remove_id)
+    if not keep or not remove:
+        db.close()
+        return jsonify({"error": "one or both products not found"}), 404
+    keep_has_installations = any(i.is_present for i in keep.installations)
+    remove_has_installations = any(i.is_present for i in remove.installations)
+    if keep_has_installations and remove_has_installations:
+        db.close()
+        return jsonify({"error": "cannot merge: both products have active installations (scanned plugins). Remove one product's installations first."}), 409
     if not db.merge_products(keep_id, remove_id):
         db.close()
         return jsonify({"error": "one or both products not found"}), 404
     db.close()
     return jsonify({"ok": True})
+
+
+@bp.route("/api/products/<int:product_id>/split", methods=["POST"])
+def api_split_installation(product_id: int):
+    db = _get_db()
+    product = db.get_product(product_id)
+    if not product:
+        db.close()
+        return jsonify({"error": "not found"}), 404
+
+    body = request.get_json(force=True)
+    installation_path = body.get("installation_path", "").strip()
+    if not installation_path:
+        db.close()
+        return jsonify({"error": "installation_path is required"}), 400
+
+    new_product = db.split_installation(product_id, installation_path)
+    if not new_product:
+        db.close()
+        return jsonify({"error": "cannot split: installation not found or product has only one installation"}), 400
+
+    db.close()
+    return jsonify({
+        "ok": True,
+        "new_product": {
+            "id": new_product.id,
+            "name": new_product.name,
+            "vendor": new_product.vendor or "",
+        },
+    })
 
 
 @bp.route("/api/products/bulk", methods=["PUT"])
@@ -333,6 +373,15 @@ def api_bulk_update_products():
 
     if "source_id" in body:
         db.batch_set_product_source(product_ids, body["source_id"])
+
+    if "category" in body:
+        if body["category"] and body["category"] not in VALID_CATEGORIES:
+            db.close()
+            return jsonify(
+                {"error": f"invalid category, must be one of: {', '.join(VALID_CATEGORIES)}"}
+            ), 400
+        for pid in product_ids:
+            db.update_product(pid, category=body["category"] or None)
 
     db.close()
     return jsonify({"ok": True})
@@ -912,6 +961,7 @@ def api_scan():
                     copyright_str=plugin.copyright,
                     min_macos_version=plugin.min_macos_version,
                 )
+        db.refresh_installed_flags()
 
     new_products = len(seen_product_ids - existing_ids)
     removed = db.count_absent()
@@ -933,6 +983,19 @@ def api_scan():
             "removed_plugins": result.removed_plugins,
         }
     )
+
+
+# --- API: Undo ---
+
+
+@bp.route("/api/undo", methods=["POST"])
+def api_undo():
+    db = _get_db()
+    if not db.restore_backup():
+        db.close()
+        return jsonify({"error": "no backup available"}), 404
+    db.close()
+    return jsonify({"ok": True})
 
 
 # --- API: Export ---

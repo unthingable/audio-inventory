@@ -253,6 +253,32 @@ class Database:
         self._data["counters"][counter] += 1
         return self._data["counters"][counter]
 
+    def restore_backup(self) -> bool:
+        backup_dir = self.data_path.parent / "backups"
+        if not backup_dir.exists():
+            return False
+        stem = self.data_path.stem
+        suffix = self.data_path.suffix
+        backups = sorted(backup_dir.glob(f"{stem}.*{suffix}"))
+        if not backups:
+            return False
+        latest = backups[-1]
+        fd, tmp = tempfile.mkstemp(
+            dir=str(self.data_path.parent), suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(latest.read_text())
+            os.replace(tmp, str(self.data_path))
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        self._load()
+        return True
+
     def close(self) -> None:
         pass
 
@@ -448,6 +474,52 @@ class Database:
         self._save()
         return True
 
+    def split_installation(self, product_id, installation_path):
+        product = self._data["products"].get(str(product_id))
+        if not product:
+            return None
+
+        inst = None
+        for i in self._data["installations"].values():
+            if i["product_id"] == product_id and i["path"] == installation_path:
+                inst = i
+                break
+        if not inst:
+            return None
+
+        count = sum(
+            1 for i in self._data["installations"].values()
+            if i["product_id"] == product_id
+        )
+        if count < 2:
+            return None
+
+        new_name = Path(installation_path).stem
+        new_vendor = inst.get("vendor_from_plist") or product["vendor"]
+
+        new_pid = self._next_id("product_id")
+        now = _now()
+        self._data["products"][str(new_pid)] = {
+            "name": new_name,
+            "vendor": new_vendor,
+            "category": product.get("category"),
+            "status": "unknown",
+            "bundle_id": None,
+            "account_id": None,
+            "license_manager_id": None,
+            "source_id": None,
+            "installed": inst.get("is_present", True),
+            "notes": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        inst["product_id"] = new_pid
+
+        product["updated_at"] = now
+        self._save()
+        return self._dict_to_product(new_pid, self._data["products"][str(new_pid)])
+
     def get_all_product_ids(self) -> set[int]:
         """Return the set of all product IDs."""
         return {int(pid) for pid in self._data["products"]}
@@ -580,6 +652,17 @@ class Database:
         """Mark all installations as absent (before a fresh scan)."""
         for inst in self._data["installations"].values():
             inst["is_present"] = False
+        self._save()
+
+    def refresh_installed_flags(self) -> None:
+        present_product_ids: set[str] = set()
+        for inst in self._data["installations"].values():
+            if inst.get("is_present"):
+                present_product_ids.add(str(inst["product_id"]))
+        now = _now()
+        for pid, p in self._data["products"].items():
+            p["installed"] = pid in present_product_ids
+            p["updated_at"] = now
         self._save()
 
     def count_absent(self) -> int:
@@ -900,6 +983,13 @@ class Database:
         lm["updated_at"] = _now()
         self._save()
         return True
+
+    def find_license_manager_by_name(self, name: str) -> LicenseManager | None:
+        q = name.lower()
+        for lm_id_str, lm in self._data["license_managers"].items():
+            if lm["name"].lower() == q:
+                return self._dict_to_license_manager(int(lm_id_str), lm)
+        return None
 
     def delete_license_manager(self, lm_id: int) -> bool:
         """Delete a license manager and unlink all its products."""

@@ -1182,6 +1182,14 @@ tbody td {
   color: var(--text-muted);
 }
 
+.license-field__readonly {
+  flex: 1;
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .license-card__actions {
   display: flex;
   align-items: center;

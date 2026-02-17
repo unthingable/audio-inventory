@@ -137,29 +137,31 @@ def scan(ctx: click.Context) -> None:
     seen_product_ids: set[int] = set()
     total_installations = 0
 
-    for group in groups:
-        name = pick_best_name(group)
-        vendor = pick_best_vendor(group)
-        category = infer_category(group)
+    with db.batch():
+        for group in groups:
+            name = pick_best_name(group)
+            vendor = pick_best_vendor(group)
+            category = infer_category(group)
 
-        product_id = db.upsert_product(name, vendor, category)
-        seen_product_ids.add(product_id)
+            product_id = db.upsert_product(name, vendor, category)
+            seen_product_ids.add(product_id)
 
-        for plugin in group:
-            db.upsert_installation(
-                product_id=product_id,
-                fmt=plugin.format,
-                path=str(plugin.path),
-                bundle_id=plugin.bundle_id,
-                version=plugin.version,
-                au_type=plugin.au_type,
-                au_subtype=plugin.au_subtype,
-                au_manufacturer=plugin.au_manufacturer,
-                vendor_from_plist=plugin.vendor,
-                copyright_str=plugin.copyright,
-                min_macos_version=plugin.min_macos_version,
-            )
-            total_installations += 1
+            for plugin in group:
+                db.upsert_installation(
+                    product_id=product_id,
+                    fmt=plugin.format,
+                    path=str(plugin.path),
+                    bundle_id=plugin.bundle_id,
+                    version=plugin.version,
+                    au_type=plugin.au_type,
+                    au_subtype=plugin.au_subtype,
+                    au_manufacturer=plugin.au_manufacturer,
+                    vendor_from_plist=plugin.vendor,
+                    copyright_str=plugin.copyright,
+                    min_macos_version=plugin.min_macos_version,
+                )
+                total_installations += 1
+        db.refresh_installed_flags()
 
     new_products = len(seen_product_ids - existing_ids)
     removed = db.count_absent()
@@ -398,8 +400,9 @@ def _display_product(
         for lic in product.licenses:
             if lic.serial_key:
                 lines.append(f"  Key: {lic.serial_key}")
-            if lic.license_manager:
-                lines.append(f"  Manager: {lic.license_manager}")
+            lic_mgr = manager_name or lic.license_manager
+            if lic_mgr:
+                lines.append(f"  Manager: {lic_mgr}")
             if lic.purchase_date:
                 lines.append(f"  Purchased: {lic.purchase_date}")
             if lic.vendor_url:
@@ -457,6 +460,17 @@ def merge_products(ctx: click.Context, keep_id: int, remove_id: int) -> None:
         return
     if not remove:
         console.print(f"Product {remove_id} not found", style="red")
+        db.close()
+        return
+
+    keep_has_installations = any(i.is_present for i in keep.installations)
+    remove_has_installations = any(i.is_present for i in remove.installations)
+    if keep_has_installations and remove_has_installations:
+        console.print(
+            "Cannot merge: both products have active installations (scanned plugins). "
+            "Remove one product's installations first.",
+            style="red",
+        )
         db.close()
         return
 
@@ -578,13 +592,20 @@ def license_add(
         )
         notes = notes.strip() or None
 
+    lm_text = manager
+    if manager:
+        lm_entity = db.find_license_manager_by_name(manager)
+        if lm_entity and not product.license_manager_id:
+            db.set_product_license_manager(product.id, lm_entity.id)
+            lm_text = None
+
     license_id = db.add_license(
         product_id=product.id,  # type: ignore[arg-type]
         serial_key=key,
         license_file_path=license_file,
         purchase_date=purchase_date,
         vendor_url=url,
-        license_manager=manager,
+        license_manager=lm_text,
         email=email,
         source=source,
         notes=notes,
@@ -618,6 +639,8 @@ def license_list(ctx: click.Context, vendor: str | None, show_all: bool) -> None
         db.close()
         return
 
+    lm_names = {lm.id: lm.name for lm in db.list_license_managers()}
+
     table = Table(title="License Status", border_style="dim")
     table.add_column("#", style="dim", justify="right")
     table.add_column("Product", style="bold")
@@ -628,15 +651,18 @@ def license_list(ctx: click.Context, vendor: str | None, show_all: bool) -> None
     table.add_column("Purchased")
 
     for i, p in enumerate(products, 1):
+        mgr_display = lm_names.get(p.license_manager_id, "") if p.license_manager_id else ""
         if p.licenses:
             lic = p.licenses[0]
             key_display = (lic.serial_key or "")[:30]
+            if not mgr_display:
+                mgr_display = lic.license_manager or ""
             table.add_row(
                 str(i),
                 p.name,
                 p.vendor or "?",
                 key_display,
-                lic.license_manager or "",
+                mgr_display,
                 lic.email or "",
                 lic.purchase_date or "",
             )
@@ -646,7 +672,7 @@ def license_list(ctx: click.Context, vendor: str | None, show_all: bool) -> None
                 p.name,
                 p.vendor or "?",
                 "",
-                "",
+                mgr_display,
                 "",
                 "",
             )
