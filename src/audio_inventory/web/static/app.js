@@ -689,7 +689,7 @@
       }
 
       tr.innerHTML = `
-        <td class="cell-check"><input type="checkbox" class="row-check" data-id="${p.id}" data-index="${index}"${checked}></td>
+        <td class="cell-check"><label><input type="checkbox" class="row-check" data-id="${p.id}" data-index="${index}"${checked}></label></td>
         <td class="cell-name"><div class="cell-name__inner"><span class="cell-name__label">${esc(p.name)}</span>${bundleTag}</div></td>
         <td class="cell-vendor">${esc(p.vendor)}</td>
         <td class="cell-category">${esc(p.category)}</td>
@@ -701,7 +701,7 @@
       `;
 
       tr.addEventListener("click", (e) => {
-        if (e.target.classList.contains("row-check")) return;
+        if (e.target.closest(".cell-check")) return;
         if (e.target.closest(".license-indicator")) return;
         if (mergeMode) return;
         // If a popover is open, just close it instead of opening drawer
@@ -713,14 +713,42 @@
           closeStatusPopover();
           return;
         }
-        openDrawer(p.id);
+        // Toggle drawer closed if clicking the same row; otherwise retarget
+        if (drawer.classList.contains("open") && selectedProductId === p.id) {
+          closeDrawer();
+        } else {
+          openDrawer(p.id);
+        }
       });
 
-      // Checkbox click
+      // Checkbox — use change event so it fires once whether clicking input or label
       const cb = tr.querySelector(".row-check");
-      cb.addEventListener("click", (e) => {
+      let lastCheckShift = false;
+      tr.querySelector(".cell-check").addEventListener("click", (e) => {
         e.stopPropagation();
-        handleRowCheck(p.id, index, e.shiftKey);
+        lastCheckShift = e.shiftKey;
+      });
+      cb.addEventListener("change", () => {
+        // Sync checkbox state with our selection set
+        if (cb.checked) {
+          selectedProductIds.add(p.id);
+        } else {
+          selectedProductIds.delete(p.id);
+        }
+        if (lastCheckShift && lastSelectedIndex >= 0 && lastSelectedIndex !== index) {
+          const start = Math.min(lastSelectedIndex, index);
+          const end = Math.max(lastSelectedIndex, index);
+          for (let i = start; i <= end; i++) {
+            if (filteredProducts[i]) selectedProductIds.add(filteredProducts[i].id);
+          }
+          tbody.querySelectorAll(".row-check").forEach((c) => {
+            c.checked = selectedProductIds.has(parseInt(c.dataset.id));
+          });
+        }
+        lastSelectedIndex = index;
+        updateSelectAllState();
+        updateBulkBar();
+        lastCheckShift = false;
       });
 
       // Status pill click opens popover
@@ -756,30 +784,6 @@
   const bulkCount = document.getElementById("bulk-count");
   const selectAllCheckbox = document.getElementById("select-all");
 
-  function handleRowCheck(productId, index, shiftKey) {
-    if (shiftKey && lastSelectedIndex >= 0 && lastSelectedIndex !== index) {
-      const start = Math.min(lastSelectedIndex, index);
-      const end = Math.max(lastSelectedIndex, index);
-      for (let i = start; i <= end; i++) {
-        if (filteredProducts[i]) {
-          selectedProductIds.add(filteredProducts[i].id);
-        }
-      }
-      // Update checkboxes visually
-      tbody.querySelectorAll(".row-check").forEach((cb) => {
-        cb.checked = selectedProductIds.has(parseInt(cb.dataset.id));
-      });
-    } else {
-      if (selectedProductIds.has(productId)) {
-        selectedProductIds.delete(productId);
-      } else {
-        selectedProductIds.add(productId);
-      }
-    }
-    lastSelectedIndex = index;
-    updateSelectAllState();
-    updateBulkBar();
-  }
 
   function updateSelectAllState() {
     if (filteredProducts.length === 0) {
@@ -1146,6 +1150,8 @@
 
   // ---- Detail Drawer ----
 
+  let _drawerFetchId = 0; // guard against stale fetches
+
   async function openDrawer(productId) {
     selectedProductId = productId;
 
@@ -1155,11 +1161,15 @@
     const row = document.querySelector(`tr[data-id="${productId}"]`);
     if (row) row.classList.add("selected");
 
+    const wasOpen = drawer.classList.contains("open");
     drawer.classList.add("open");
-    drawerOverlay.classList.add("open");
-    drawerTitle.textContent = "Loading...";
-    drawerVendor.textContent = "";
-    drawerBody.innerHTML = "";
+
+    // Only show loading state on first open; keep previous content while switching
+    if (!wasOpen) {
+      drawerTitle.textContent = "Loading...";
+      drawerVendor.textContent = "";
+      drawerBody.innerHTML = "";
+    }
 
     // In merge mode with preview on, render the synthetic product
     if (mergeMode && mergePreviewOn && mergeSyntheticProduct) {
@@ -1176,11 +1186,15 @@
       }
     }
 
+    const fetchId = ++_drawerFetchId;
     try {
       const res = await fetch(`/api/products/${productId}`);
+      if (fetchId !== _drawerFetchId) return; // superseded by newer navigation
       const product = await res.json();
+      if (fetchId !== _drawerFetchId) return;
       renderDrawer(product);
     } catch (err) {
+      if (fetchId !== _drawerFetchId) return;
       drawerBody.innerHTML =
         '<p class="no-data">Failed to load product details</p>';
     }
@@ -2610,22 +2624,28 @@
     const initTh = document.querySelector(`th[data-sort="${sortColumn}"]`);
     if (initTh) initTh.classList.add("sorted-asc");
 
-    // Select-all checkbox
+    // Select-all checkbox — indeterminate click clears selection
+    let selectAllWasIndeterminate = false;
+    // Capture indeterminate on mousedown, before the browser clears it
+    selectAllCheckbox.closest("label").addEventListener("mousedown", () => {
+      selectAllWasIndeterminate = selectAllCheckbox.indeterminate;
+    });
     selectAllCheckbox.addEventListener("change", () => {
       const visibleIds = filteredProducts.map((p) => p.id);
-      if (selectAllCheckbox.checked) {
-        visibleIds.forEach((id) => selectedProductIds.add(id));
-      } else {
+      if (selectAllWasIndeterminate || !selectAllCheckbox.checked) {
+        // Indeterminate → deselect all; unchecked → deselect all
         visibleIds.forEach((id) => selectedProductIds.delete(id));
+        selectAllCheckbox.checked = false;
+        selectAllCheckbox.indeterminate = false;
+      } else {
+        visibleIds.forEach((id) => selectedProductIds.add(id));
       }
+      selectAllWasIndeterminate = false;
       tbody.querySelectorAll(".row-check").forEach((cb) => {
         cb.checked = selectedProductIds.has(parseInt(cb.dataset.id));
       });
       updateBulkBar();
     });
-
-    // Bulk actions
-    document.getElementById("bulk-deselect").addEventListener("click", clearSelection);
 
     document.getElementById("bulk-status").addEventListener("change", async (e) => {
       const status = e.target.value;
@@ -2884,6 +2904,20 @@
           searchInput.blur();
         }
       }
+
+      // Arrow keys navigate rows when drawer is open
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && drawer.classList.contains("open") && selectedProductId != null && !mergeMode) {
+        const tag = document.activeElement?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        e.preventDefault();
+        const idx = filteredProducts.findIndex((p) => p.id === selectedProductId);
+        if (idx === -1) return;
+        const next = e.key === "ArrowDown" ? idx + 1 : idx - 1;
+        if (next < 0 || next >= filteredProducts.length) return;
+        openDrawer(filteredProducts[next].id);
+        const row = document.querySelector(`tr[data-id="${filteredProducts[next].id}"]`);
+        if (row) row.scrollIntoView({ block: "nearest" });
+      }
     });
   }
 
@@ -2922,6 +2956,7 @@
         updateMergePanelSummary();
         // Open drawer showing the primary product, then show merge panel
         openDrawer(mergeKeepId);
+        drawerOverlay.classList.add("open");
         mergePanel.classList.add("open");
       })
       .catch(() => {

@@ -142,7 +142,6 @@
       <option value="__none__">None</option>
     </select>
     <button class="btn btn--ghost btn--sm bulk-bar__merge" id="bulk-merge" style="display:none">Merge</button>
-    <button class="btn btn--ghost btn--sm bulk-bar__deselect" id="bulk-deselect">Deselect All</button>
   </div>
 
   <!-- Main table -->
@@ -150,7 +149,7 @@
     <table id="product-table">
       <thead>
         <tr>
-          <th class="col-check"><input type="checkbox" id="select-all"></th>
+          <th class="col-check"><label><input type="checkbox" id="select-all"></label></th>
           <th class="col-name sortable" data-sort="name">Name <span class="sort-arrow"></span></th>
           <th class="col-vendor sortable" data-sort="vendor">Vendor <span class="sort-arrow"></span></th>
           <th class="col-category sortable" data-sort="category">Category <span class="sort-arrow"></span></th>
