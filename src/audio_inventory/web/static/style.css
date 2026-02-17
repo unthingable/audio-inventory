@@ -2240,6 +2240,212 @@ tbody td {
   border-color: var(--text-muted);
 }
 
-.bulk-bar__deselect {
+.bulk-bar__merge {
   margin-left: auto;
+}
+
+.bulk-bar__deselect {
+  margin-left: 0;
+}
+
+/* ============================================================
+   Merge Panel (slides in to the left of the drawer)
+   ============================================================ */
+
+.merge-panel {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 480px;
+  width: 280px;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  z-index: 310;
+  transform: translateX(calc(280px + 480px));
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.merge-panel.open {
+  transform: translateX(0);
+}
+
+.merge-panel__header {
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--border);
+}
+
+.merge-panel__title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.merge-panel__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-md) var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.merge-panel__section-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.merge-panel__product-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.merge-product-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.merge-product-radio:hover {
+  background: var(--bg-hover);
+}
+
+.merge-product-radio input[type="radio"] {
+  margin-top: 3px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.merge-product-radio__info {
+  min-width: 0;
+}
+
+.merge-product-radio__name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merge-product-radio__vendor {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.merge-panel__toggle-wrap {
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.merge-panel__toggle-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.merge-panel__toggle-label input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.merge-panel__summary {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-md);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.merge-panel__summary strong {
+  color: var(--text-primary);
+}
+
+.merge-panel__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  font-size: 11px;
+  color: var(--status-demo);
+  background: rgba(232, 196, 50, 0.08);
+  border: 1px solid rgba(232, 196, 50, 0.2);
+  border-radius: var(--radius-md);
+  line-height: 1.4;
+}
+
+.merge-panel__warning svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--status-demo);
+}
+
+.merge-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  border-top: 1px solid var(--border);
+}
+
+.merge-panel__actions .btn--accent:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Read-only drawer state during merge preview */
+.drawer--readonly input,
+.drawer--readonly select,
+.drawer--readonly textarea {
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+.drawer--readonly button {
+  display: none;
+}
+
+.drawer--readonly .drawer__close {
+  display: flex;
+}
+
+.drawer--readonly .entity-picker__chip-remove,
+.drawer--readonly .entity-picker__chip-edit,
+.drawer--readonly .entity-picker__create-btn {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .merge-panel {
+    right: 0;
+    top: auto;
+    bottom: 0;
+    width: 100vw;
+    height: 260px;
+    transform: translateY(100%);
+    border-left: none;
+    border-right: none;
+    border-top: 1px solid var(--border);
+  }
+  .merge-panel.open {
+    transform: translateY(0);
+  }
 }

@@ -703,6 +703,7 @@
       tr.addEventListener("click", (e) => {
         if (e.target.classList.contains("row-check")) return;
         if (e.target.closest(".license-indicator")) return;
+        if (mergeMode) return;
         // If a popover is open, just close it instead of opening drawer
         if (licensePopover.classList.contains("open")) {
           closeLicensePopover();
@@ -796,6 +797,8 @@
     const count = selectedProductIds.size;
     bulkCount.textContent = count;
     bulkBar.classList.toggle("visible", count > 0);
+    const mergeBtn = document.getElementById("bulk-merge");
+    if (mergeBtn) mergeBtn.style.display = count >= 2 ? "" : "none";
   }
 
   function clearSelection() {
@@ -1151,6 +1154,21 @@
     drawerVendor.textContent = "";
     drawerBody.innerHTML = "";
 
+    // In merge mode with preview on, render the synthetic product
+    if (mergeMode && mergePreviewOn && mergeSyntheticProduct) {
+      renderDrawer(mergeSyntheticProduct);
+      return;
+    }
+
+    // In merge mode without preview, render the primary from cached details
+    if (mergeMode) {
+      const cached = mergeProductDetails.find((p) => p.id === productId);
+      if (cached) {
+        renderDrawer(cached);
+        return;
+      }
+    }
+
     try {
       const res = await fetch(`/api/products/${productId}`);
       const product = await res.json();
@@ -1277,6 +1295,19 @@
 
     drawerBody.innerHTML = html;
 
+    if (product._synthetic) {
+      // Preview mode: editable but no live API handlers
+      drawer.classList.remove("drawer--readonly");
+      return;
+    }
+
+    if (mergeMode) {
+      // Source product in merge mode: read-only
+      makeDrawerReadOnly();
+      return;
+    }
+
+    drawer.classList.remove("drawer--readonly");
     // Bind status change handler
     bindStatusHandler(product);
     // Bind category change handler
@@ -1584,12 +1615,11 @@
   }
 
   function closeDrawer() {
-    drawer.classList.remove("open");
-    drawerOverlay.classList.remove("open");
-    selectedProductId = null;
-    document.querySelectorAll("tbody tr.selected").forEach((tr) => {
-      tr.classList.remove("selected");
-    });
+    if (mergeMode) {
+      closeMergeMode();
+      return;
+    }
+    _closeDrawerUI();
   }
 
   // ---- Bundle/Account/License Manager Management Overlay ----
@@ -2761,6 +2791,31 @@
       });
     }
 
+    // Merge (drawer + side panel)
+    document.getElementById("bulk-merge").addEventListener("click", openMergeMode);
+    mergePanelCancel.addEventListener("click", closeMergeMode);
+    mergePanelConfirm.addEventListener("click", executeMerge);
+    mergePreviewToggle.addEventListener("change", () => {
+      mergePreviewOn = mergePreviewToggle.checked;
+      if (mergePreviewOn) {
+        mergeSyntheticProduct = buildSyntheticProduct();
+        if (mergeSyntheticProduct) {
+          mergePanelConfirm.disabled = false;
+          renderDrawer(mergeSyntheticProduct);
+        } else {
+          mergePreviewToggle.checked = false;
+          mergePreviewOn = false;
+          mergePanelConfirm.disabled = true;
+          toast("Cannot preview merge yet", "error");
+        }
+      } else {
+        mergePanelConfirm.disabled = true;
+        drawer.classList.remove("drawer--readonly");
+        const primary = mergeProductDetails.find((p) => p.id === mergeKeepId);
+        if (primary) renderDrawer(primary);
+      }
+    });
+
     // Drawer
     drawerClose.addEventListener("click", closeDrawer);
     drawerOverlay.addEventListener("click", closeDrawer);
@@ -2806,7 +2861,9 @@
       }
 
       if (e.key === "Escape") {
-        if (createProductOverlay.classList.contains("active")) {
+        if (mergeMode) {
+          closeMergeMode();
+        } else if (createProductOverlay.classList.contains("active")) {
           createProductOverlay.classList.remove("active");
         } else if (licensePopover.classList.contains("open")) {
           closeLicensePopover();
@@ -2821,6 +2878,247 @@
         }
       }
     });
+  }
+
+  // ---- Merge Products (Drawer + Side Panel) ----
+
+  const mergePanel = document.getElementById("merge-panel");
+  const mergePanelProductList = document.getElementById("merge-panel-product-list");
+  const mergePanelSummary = document.getElementById("merge-panel-summary");
+  const mergePreviewToggle = document.getElementById("merge-preview-toggle");
+  const mergePanelConfirm = document.getElementById("merge-panel-confirm");
+  const mergePanelCancel = document.getElementById("merge-panel-cancel");
+  let mergeMode = false;
+  let mergeProductDetails = [];
+  let mergeKeepId = null;
+  let mergePreviewOn = false;
+  let mergeSyntheticProduct = null;
+
+  function openMergeMode() {
+    const ids = [...selectedProductIds];
+    if (ids.length < 2) return;
+
+    mergeProductDetails = [];
+    mergeKeepId = null;
+    mergePreviewOn = false;
+    mergeSyntheticProduct = null;
+    mergePreviewToggle.checked = false;
+    mergePanelConfirm.disabled = true;
+
+    Promise.all(ids.map((id) => fetch(`/api/products/${id}`).then((r) => r.json())))
+      .then((details) => {
+        mergeProductDetails = details;
+        mergeKeepId = details[0].id;
+        mergeMode = true;
+        renderMergePanelProductList();
+        updateMergePanelSummary();
+        // Open drawer showing the primary product, then show merge panel
+        openDrawer(mergeKeepId);
+        mergePanel.classList.add("open");
+      })
+      .catch(() => {
+        toast("Failed to load product details", "error");
+      });
+  }
+
+  function closeMergeMode() {
+    mergeMode = false;
+    mergeProductDetails = [];
+    mergeKeepId = null;
+    mergePreviewOn = false;
+    mergeSyntheticProduct = null;
+    mergePanel.classList.remove("open");
+    drawer.classList.remove("drawer--readonly");
+    _closeDrawerUI();
+  }
+
+  function _closeDrawerUI() {
+    drawer.classList.remove("open");
+    drawerOverlay.classList.remove("open");
+    selectedProductId = null;
+    document.querySelectorAll("tbody tr.selected").forEach((tr) => {
+      tr.classList.remove("selected");
+    });
+  }
+
+  function buildSyntheticProduct() {
+    const primary = mergeProductDetails.find((p) => p.id === mergeKeepId);
+    if (!primary) return null;
+
+    const ordered = [primary, ...mergeProductDetails.filter((p) => p.id !== mergeKeepId)];
+
+    function firstVal(field) {
+      for (const p of ordered) {
+        if (p[field]) return p[field];
+      }
+      return null;
+    }
+
+    // Best status: prefer non-unknown
+    const bestStatus = ordered.map((p) => p.status).find((s) => s && s !== "unknown") || primary.status;
+
+    // Concatenate installations and licenses from all products
+    const allInstallations = [];
+    const allLicenses = [];
+    ordered.forEach((p) => {
+      (p.installations || []).forEach((inst) => allInstallations.push(inst));
+      (p.licenses || []).forEach((lic) => allLicenses.push(lic));
+    });
+
+    // Deduplicated notes
+    const allNotes = ordered.map((p) => (p.notes || "").trim()).filter(Boolean);
+    const combinedNotes = [...new Set(allNotes)].join("\n");
+
+    // Build entity objects for each association
+    function firstEntity(idProp, objProp) {
+      for (const p of ordered) {
+        if (p[idProp] && p[objProp]) return { id: p[idProp], obj: p[objProp] };
+      }
+      return { id: null, obj: null };
+    }
+
+    const bundle = firstEntity("bundle_id", "bundle");
+    const account = firstEntity("account_id", "account");
+    const lm = firstEntity("license_manager_id", "license_manager");
+    const source = firstEntity("source_id", "source");
+
+    return {
+      _synthetic: true,
+      id: primary.id,
+      name: primary.name,
+      vendor: firstVal("vendor") || "",
+      category: firstVal("category") || "",
+      status: bestStatus,
+      installed: ordered.some((p) => p.installed),
+      notes: combinedNotes,
+      bundle_id: bundle.id,
+      bundle: bundle.obj,
+      account_id: account.id,
+      account: account.obj,
+      license_manager_id: lm.id,
+      license_manager: lm.obj,
+      source_id: source.id,
+      source: source.obj,
+      installations: allInstallations,
+      licenses: allLicenses,
+      formats: [...new Set(ordered.flatMap((p) => p.formats || []))],
+      version: firstVal("version") || "",
+    };
+  }
+
+  function renderMergePanelProductList() {
+    let html = "";
+    mergeProductDetails.forEach((p) => {
+      const checked = p.id === mergeKeepId ? "checked" : "";
+      html += `<label class="merge-product-radio">
+        <input type="radio" name="merge-primary" value="${p.id}" ${checked}>
+        <div class="merge-product-radio__info">
+          <div class="merge-product-radio__name">${esc(p.name)}</div>
+          <div class="merge-product-radio__vendor">${esc(p.vendor) || "\u2014"}</div>
+        </div>
+      </label>`;
+    });
+    mergePanelProductList.innerHTML = html;
+
+    mergePanelProductList.querySelectorAll('input[name="merge-primary"]').forEach((radio) => {
+      radio.addEventListener("change", () => {
+        mergeKeepId = parseInt(radio.value);
+        mergeSyntheticProduct = buildSyntheticProduct();
+        updateMergePanelSummary();
+        // Re-render drawer with new primary (or synthetic if preview on)
+        if (mergePreviewOn) {
+          renderDrawer(mergeSyntheticProduct);
+        } else {
+          const primary = mergeProductDetails.find((p) => p.id === mergeKeepId);
+          if (primary) renderDrawer(primary);
+        }
+      });
+    });
+  }
+
+  function updateMergePanelSummary() {
+    let totalInstalls = 0;
+    let totalLicenses = 0;
+    mergeProductDetails.forEach((p) => {
+      totalInstalls += (p.installations || []).length;
+      totalLicenses += (p.licenses || []).length;
+    });
+    const others = mergeProductDetails.filter((p) => p.id !== mergeKeepId);
+    const otherNames = others.map((p) => `<strong>${esc(p.name)}</strong>`).join(", ");
+    mergePanelSummary.innerHTML = `
+      <strong>${totalInstalls}</strong> installation${totalInstalls !== 1 ? "s" : ""},
+      <strong>${totalLicenses}</strong> license${totalLicenses !== 1 ? "s" : ""} combined.<br>
+      Merging ${otherNames} into primary.
+    `;
+  }
+
+  function makeDrawerReadOnly() {
+    drawer.classList.add("drawer--readonly");
+  }
+
+  async function executeMerge() {
+    if (!mergeSyntheticProduct) {
+      toast("Cannot merge: preview data not ready", "error");
+      return;
+    }
+    const primary = mergeProductDetails.find((p) => p.id === mergeKeepId);
+    if (!primary) {
+      toast("Cannot merge: primary product not found", "error");
+      return;
+    }
+
+    const others = mergeProductDetails.filter((p) => p.id !== mergeKeepId);
+    mergePanelConfirm.disabled = true;
+    mergePanelConfirm.textContent = "Merging...";
+
+    try {
+      // 1. Merge each non-keep product into the keep product
+      for (const other of others) {
+        const res = await fetch("/api/products/merge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keep_id: mergeKeepId, remove_id: other.id }),
+        });
+        if (!res.ok) {
+          toast(`Failed to merge "${other.name}"`, "error");
+          mergePanelConfirm.disabled = false;
+          mergePanelConfirm.textContent = "Merge";
+          return;
+        }
+      }
+
+      // 2. Apply field edits — read DOM for editable fields, fall back to synthetic for the rest
+      const syn = mergeSyntheticProduct;
+      const updates = {
+        name: syn.name,
+        vendor: syn.vendor,
+        category: document.getElementById("drawer-category")?.value || null,
+        status: document.getElementById("drawer-status")?.value || "unknown",
+        notes: document.getElementById("drawer-notes")?.value?.trim() || "",
+        installed: document.getElementById("drawer-installed")?.checked ?? syn.installed,
+        bundle_id: syn.bundle_id || null,
+        account_id: syn.account_id || null,
+        license_manager_id: syn.license_manager_id || null,
+        source_id: syn.source_id || null,
+      };
+
+      await fetch(`/api/products/${mergeKeepId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+
+      // 3. Refresh and clean up
+      closeMergeMode();
+      clearSelection();
+      await Promise.all([loadProducts(), loadBundles(), loadAccounts(), loadLicenseManagers(), loadSources()]);
+      toast(`Merged ${others.length + 1} products`, "success");
+    } catch {
+      toast("Merge failed", "error");
+    } finally {
+      mergePanelConfirm.disabled = false;
+      mergePanelConfirm.textContent = "Merge";
+    }
   }
 
   // ---- Theme Toggle ----

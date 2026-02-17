@@ -141,6 +141,7 @@
       <option value="">Assign Source...</option>
       <option value="__none__">None</option>
     </select>
+    <button class="btn btn--ghost btn--sm bulk-bar__merge" id="bulk-merge" style="display:none">Merge</button>
     <button class="btn btn--ghost btn--sm bulk-bar__deselect" id="bulk-deselect">Deselect All</button>
   </div>
 
@@ -317,6 +318,32 @@
           <button class="btn btn--ghost btn--sm" id="cp-cancel">Cancel</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Merge panel (slides in to the left of the drawer) -->
+  <div class="merge-panel" id="merge-panel">
+    <div class="merge-panel__header">
+      <h3 class="merge-panel__title">Merge Products</h3>
+    </div>
+    <div class="merge-panel__body">
+      <div class="merge-panel__section-label">Keep as primary</div>
+      <div class="merge-panel__product-list" id="merge-panel-product-list"></div>
+      <div class="merge-panel__toggle-wrap">
+        <label class="merge-panel__toggle-label">
+          <input type="checkbox" id="merge-preview-toggle">
+          <span>Preview merged result</span>
+        </label>
+      </div>
+      <div class="merge-panel__summary" id="merge-panel-summary"></div>
+      <div class="merge-panel__warning">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1L1 14h14L8 1z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6v4M8 11.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Non-primary products will be deleted. Installations and licenses transfer to the primary.
+      </div>
+    </div>
+    <div class="merge-panel__actions">
+      <button class="btn--accent btn--sm" id="merge-panel-confirm" disabled>Merge</button>
+      <button class="btn btn--ghost btn--sm" id="merge-panel-cancel">Cancel</button>
     </div>
   </div>
 

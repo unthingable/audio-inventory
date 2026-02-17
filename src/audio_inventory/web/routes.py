@@ -243,8 +243,28 @@ def api_update_product(product_id: int):
     if "notes" in body:
         kwargs["notes"] = body["notes"] or None
 
+    if "name" in body:
+        name = (body["name"] or "").strip()
+        if name:
+            kwargs["name"] = name
+
+    if "vendor" in body:
+        kwargs["vendor"] = body["vendor"] or None
+
     if kwargs:
         db.update_product(product_id, **kwargs)
+
+    # Entity ID assignments (single-product batch)
+    pid_list = [product_id]
+    if "bundle_id" in body:
+        db.batch_set_product_bundle(pid_list, body["bundle_id"])
+    if "account_id" in body:
+        db.batch_set_product_account(pid_list, body["account_id"])
+    if "license_manager_id" in body:
+        db.batch_set_product_license_manager(pid_list, body["license_manager_id"])
+    if "source_id" in body:
+        db.batch_set_product_source(pid_list, body["source_id"])
+
     db.close()
     return jsonify({"ok": True})
 
