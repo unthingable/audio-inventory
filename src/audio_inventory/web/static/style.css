@@ -2244,6 +2244,11 @@ tbody td {
   margin-left: auto;
 }
 
+.bulk-bar__merge.merge-blocked {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
 .bulk-bar__deselect {
   margin-left: 0;
 }
@@ -2346,6 +2351,12 @@ tbody td {
   color: var(--text-muted);
 }
 
+.merge-product-radio__counts {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
 .merge-panel__toggle-wrap {
   padding-top: var(--space-sm);
   border-top: 1px solid var(--border-subtle);
@@ -2365,6 +2376,48 @@ tbody td {
   accent-color: var(--accent);
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+  background: var(--bg-active);
+  border-radius: 9px;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.toggle-switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+input:checked + .toggle-switch {
+  background: var(--accent-glow);
+}
+
+input:checked + .toggle-switch .toggle-switch__thumb {
+  transform: translateX(16px);
+  background: var(--accent);
+}
+
 .merge-panel__summary {
   background: var(--bg-raised);
   border: 1px solid var(--border-subtle);
@@ -2377,6 +2430,18 @@ tbody td {
 
 .merge-panel__summary strong {
   color: var(--text-primary);
+}
+
+.merge-panel__conflict {
+  color: var(--status-demo);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.merge-panel__scan-tag {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .merge-panel__warning {
@@ -2402,8 +2467,7 @@ tbody td {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  padding: var(--space-md) var(--space-lg);
-  border-top: 1px solid var(--border);
+  margin-top: var(--space-sm);
 }
 
 .merge-panel__actions .btn--accent:disabled {

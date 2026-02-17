@@ -798,7 +798,14 @@
     bulkCount.textContent = count;
     bulkBar.classList.toggle("visible", count > 0);
     const mergeBtn = document.getElementById("bulk-merge");
-    if (mergeBtn) mergeBtn.style.display = count >= 2 ? "" : "none";
+    if (mergeBtn) {
+      mergeBtn.style.display = count >= 2 ? "" : "none";
+      // Strike-through when multiple selected products have installations (conflict)
+      const installedCount = allProducts.filter(
+        (p) => selectedProductIds.has(p.id) && p.installed
+      ).length;
+      mergeBtn.classList.toggle("merge-blocked", installedCount > 1);
+    }
   }
 
   function clearSelection() {
@@ -2800,8 +2807,8 @@
       if (mergePreviewOn) {
         mergeSyntheticProduct = buildSyntheticProduct();
         if (mergeSyntheticProduct) {
-          mergePanelConfirm.disabled = false;
           renderDrawer(mergeSyntheticProduct);
+          updateMergePanelSummary();
         } else {
           mergePreviewToggle.checked = false;
           mergePreviewOn = false;
@@ -2900,15 +2907,16 @@
 
     mergeProductDetails = [];
     mergeKeepId = null;
-    mergePreviewOn = false;
+    mergePreviewOn = true;
     mergeSyntheticProduct = null;
-    mergePreviewToggle.checked = false;
-    mergePanelConfirm.disabled = true;
+    mergePreviewToggle.checked = true;
+    mergePanelConfirm.disabled = false;
 
     Promise.all(ids.map((id) => fetch(`/api/products/${id}`).then((r) => r.json())))
       .then((details) => {
         mergeProductDetails = details;
         mergeKeepId = details[0].id;
+        mergeSyntheticProduct = buildSyntheticProduct();
         mergeMode = true;
         renderMergePanelProductList();
         updateMergePanelSummary();
@@ -2982,11 +2990,22 @@
     const lm = firstEntity("license_manager_id", "license_manager");
     const source = firstEntity("source_id", "source");
 
+    // Scanned name takes precedence: if exactly one product has installations,
+    // use its name (and vendor if non-empty) so the next scan matches.
+    let finalName = primary.name;
+    let finalVendor = firstVal("vendor") || "";
+    const scannedProducts = mergeProductDetails.filter((p) => (p.installations || []).length > 0);
+    if (scannedProducts.length === 1) {
+      const scanned = scannedProducts[0];
+      finalName = scanned.name;
+      if (scanned.vendor) finalVendor = scanned.vendor;
+    }
+
     return {
       _synthetic: true,
       id: primary.id,
-      name: primary.name,
-      vendor: firstVal("vendor") || "",
+      name: finalName,
+      vendor: finalVendor,
       category: firstVal("category") || "",
       status: bestStatus,
       installed: ordered.some((p) => p.installed),
@@ -3010,11 +3029,14 @@
     let html = "";
     mergeProductDetails.forEach((p) => {
       const checked = p.id === mergeKeepId ? "checked" : "";
+      const instCount = (p.installations || []).length;
+      const licCount = (p.licenses || []).length;
       html += `<label class="merge-product-radio">
         <input type="radio" name="merge-primary" value="${p.id}" ${checked}>
         <div class="merge-product-radio__info">
           <div class="merge-product-radio__name">${esc(p.name)}</div>
           <div class="merge-product-radio__vendor">${esc(p.vendor) || "\u2014"}</div>
+          <div class="merge-product-radio__counts">${instCount} inst · ${licCount} lic</div>
         </div>
       </label>`;
     });
@@ -3043,13 +3065,35 @@
       totalInstalls += (p.installations || []).length;
       totalLicenses += (p.licenses || []).length;
     });
+
+    // Block merge if multiple products have installations (distinct scanned plugins)
+    const scannedProducts = mergeProductDetails.filter((p) => (p.installations || []).length > 0);
+    if (scannedProducts.length > 1) {
+      mergePanelSummary.innerHTML = `
+        <div class="merge-panel__conflict">Cannot merge: multiple scanned products selected. Each product with installations likely represents a distinct plugin.</div>
+      `;
+      mergePanelConfirm.disabled = true;
+      return;
+    }
+
+    const primary = mergeProductDetails.find((p) => p.id === mergeKeepId);
     const others = mergeProductDetails.filter((p) => p.id !== mergeKeepId);
     const otherNames = others.map((p) => `<strong>${esc(p.name)}</strong>`).join(", ");
+    const primaryName = primary ? `<strong>${esc(primary.name)}</strong>` : "primary";
+
+    // Show name override info when scanned name differs from primary
+    let nameNote = "";
+    if (scannedProducts.length === 1 && primary && scannedProducts[0].id !== primary.id) {
+      nameNote = `<br>Name: <strong>${esc(scannedProducts[0].name)}</strong> <span class="merge-panel__scan-tag">(scan name)</span>`;
+    }
+
     mergePanelSummary.innerHTML = `
-      <strong>${totalInstalls}</strong> installation${totalInstalls !== 1 ? "s" : ""},
-      <strong>${totalLicenses}</strong> license${totalLicenses !== 1 ? "s" : ""} combined.<br>
-      Merging ${otherNames} into primary.
+      Keep ${primaryName} — absorb ${otherNames}.${nameNote}<br>
+      Result: <strong>${totalInstalls}</strong> installation${totalInstalls !== 1 ? "s" : ""},
+      <strong>${totalLicenses}</strong> license${totalLicenses !== 1 ? "s" : ""}.
     `;
+
+    if (mergePreviewOn) mergePanelConfirm.disabled = false;
   }
 
   function makeDrawerReadOnly() {
