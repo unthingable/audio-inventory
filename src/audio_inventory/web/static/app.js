@@ -188,6 +188,8 @@
 
   /** Bind all entity picker interactions for the current drawer */
   function bindEntityPickers(product) {
+    if (_entityPickerAC) _entityPickerAC.abort();
+    _entityPickerAC = new AbortController();
     ENTITY_SECTIONS.forEach((config) => {
       const picker = document.querySelector(`.entity-picker[data-entity-key="${config.key}"]`);
       if (!picker) return;
@@ -347,7 +349,7 @@
       // Close on outside click (use mousedown so it fires before blur)
       document.addEventListener("mousedown", (e) => {
         if (!picker.contains(e.target)) closeDropdown();
-      });
+      }, { signal: _entityPickerAC.signal });
 
       // "Create new..." button
       createBtn.addEventListener("click", (e) => {
@@ -415,6 +417,8 @@
   let selectedProductId = null;
   let selectedProductIds = new Set();
   let lastSelectedIndex = -1;
+  let _entityPickerAC = null;
+  let _licPopoverFetchId = 0;
   let privacyMode = false;
 
   // DOM refs
@@ -462,7 +466,7 @@
       applyFilters();
     } catch (err) {
       tbody.innerHTML =
-        '<tr class="no-results"><td colspan="8">Failed to load products</td></tr>';
+        '<tr class="no-results"><td colspan="9">Failed to load products</td></tr>';
     }
   }
 
@@ -583,6 +587,7 @@
   // ---- Filtering ----
 
   function applyFilters() {
+    lastSelectedIndex = -1;
     const query = searchInput.value.toLowerCase().trim();
     const vendor = filterVendor.value;
     const category = filterCategory.value;
@@ -659,7 +664,7 @@
 
     if (filteredProducts.length === 0) {
       tbody.innerHTML =
-        '<tr class="no-results"><td colspan="8">No products match your filters</td></tr>';
+        '<tr class="no-results"><td colspan="9">No products match your filters</td></tr>';
       return;
     }
 
@@ -739,7 +744,13 @@
           const start = Math.min(lastSelectedIndex, index);
           const end = Math.max(lastSelectedIndex, index);
           for (let i = start; i <= end; i++) {
-            if (filteredProducts[i]) selectedProductIds.add(filteredProducts[i].id);
+            if (filteredProducts[i]) {
+              if (cb.checked) {
+                selectedProductIds.add(filteredProducts[i].id);
+              } else {
+                selectedProductIds.delete(filteredProducts[i].id);
+              }
+            }
           }
           tbody.querySelectorAll(".row-check").forEach((c) => {
             c.checked = selectedProductIds.has(parseInt(c.dataset.id));
@@ -784,7 +795,6 @@
   const bulkCount = document.getElementById("bulk-count");
   const selectAllCheckbox = document.getElementById("select-all");
 
-
   function updateSelectAllState() {
     if (filteredProducts.length === 0) {
       selectAllCheckbox.checked = false;
@@ -822,14 +832,15 @@
 
   function formatBadges(formats) {
     return formats
-      .map((f) => `<span class="fmt-badge fmt-${f}">${f}</span>`)
+      .map((f) => `<span class="fmt-badge fmt-${esc(f)}">${esc(f)}</span>`)
       .join("");
   }
 
   function statusPill(status, productId) {
-    const cls = status === "unknown" ? "status-pill status-unknown status-pill--empty" : `status-pill status-${status}`;
-    const label = status === "unknown" ? "+" : status;
-    return `<span class="${cls}" data-product-id="${productId}" data-status="${status}">${label}</span>`;
+    const safe = esc(status);
+    const cls = status === "unknown" ? "status-pill status-unknown status-pill--empty" : `status-pill status-${safe}`;
+    const label = status === "unknown" ? "+" : safe;
+    return `<span class="${cls}" data-product-id="${productId}" data-status="${safe}">${label}</span>`;
   }
 
   function esc(str) {
@@ -995,11 +1006,14 @@
 
     if (product.has_license) {
       // Fetch full product to get license details
+      const fetchId = ++_licPopoverFetchId;
       try {
         const res = await fetch(`/api/products/${productId}`);
+        if (fetchId !== _licPopoverFetchId) return;
         const detail = await res.json();
         renderLicensePopoverSummary(detail);
       } catch {
+        if (fetchId !== _licPopoverFetchId) return;
         licensePopover.innerHTML = '<p class="no-data">Failed to load</p>';
       }
     } else {
@@ -1073,6 +1087,12 @@
 
   function renderLicensePopoverSummary(product) {
     const lic = product.licenses[0]; // Show first license
+    if (!lic) {
+      licensePopover.innerHTML =
+        '<div class="license-popover__title">License Info</div>' +
+        '<p class="no-data">No license details</p>';
+      return;
+    }
     let html = '<div class="license-popover__title">License Info</div>';
     html += '<dl class="license-popover__summary">';
 
@@ -1521,7 +1541,6 @@
     });
   }
 
-
   function bindLicenseHandlers(product) {
     const container = document.getElementById("drawer-licenses");
 
@@ -1617,6 +1636,7 @@
         });
 
         newCard.querySelector(".license-cancel-btn").addEventListener("click", () => {
+          addBtn.style.display = "";
           newCard.remove();
           if (!container.querySelector(".license-card")) {
             container.innerHTML = '<p class="no-data" id="no-licenses-msg">No license info recorded</p>';
@@ -1628,9 +1648,6 @@
         if (firstInput) firstInput.focus();
 
         addBtn.style.display = "none";
-        newCard.addEventListener("DOMNodeRemovedFromDocument", () => {
-          addBtn.style.display = "";
-        });
       });
     }
   }
@@ -1643,13 +1660,77 @@
     _closeDrawerUI();
   }
 
-  // ---- Bundle/Account/License Manager Management Overlay ----
+  // ---- Entity Management Overlay (Bundle, Account, License Manager, Source) ----
 
-  let selectedBundleId = null;
-  let selectedAccountId = null;
-  let selectedLicenseManagerId = null;
-  let selectedSourceId = null;
   let currentEntityTab = "bundles";
+
+  const MANAGE_CONFIGS = {
+    bundles: {
+      label: "Bundle",
+      fields: BUNDLE_FIELDS,
+      apiEndpoint: "/api/bundles",
+      reloadFn: loadBundles,
+      listId: "bundle-list",
+      emptyId: "bundle-detail-empty",
+      formId: "bundle-detail-form",
+      createBtnId: "bundle-create-btn",
+      idPrefix: "bundle",
+      dataIdAttr: "bundleId",
+      selectedId: null,
+      allItems: () => allBundles,
+      sensitiveFields: new Set(["serial_key"]),
+      renderListMeta: (item) => `${esc(item.vendor)} &middot; ${item.product_count} products`,
+      renderDetailExtra: renderBundleMemberProducts,
+    },
+    accounts: {
+      label: "Account",
+      fields: ACCOUNT_FIELDS,
+      apiEndpoint: "/api/accounts",
+      reloadFn: loadAccounts,
+      listId: "account-list",
+      emptyId: "account-detail-empty",
+      formId: "account-detail-form",
+      createBtnId: "account-create-btn",
+      idPrefix: "account",
+      dataIdAttr: "accountId",
+      selectedId: null,
+      allItems: () => allAccounts,
+      sensitiveFields: new Set(["email"]),
+      renderListMeta: (item) => esc(item.email) || "No email",
+    },
+    managers: {
+      label: "License Manager",
+      fields: LICENSE_MANAGER_FIELDS,
+      apiEndpoint: "/api/license-managers",
+      reloadFn: loadLicenseManagers,
+      listId: "lm-list",
+      emptyId: "lm-detail-empty",
+      formId: "lm-detail-form",
+      createBtnId: "lm-create-btn",
+      idPrefix: "lm",
+      dataIdAttr: "lmId",
+      selectedId: null,
+      allItems: () => allLicenseManagers,
+      sensitiveFields: new Set(),
+      renderListMeta: (item) => esc(item.url) || "No URL",
+    },
+    sources: {
+      label: "Source",
+      fields: SOURCE_FIELDS,
+      apiEndpoint: "/api/sources",
+      reloadFn: loadSources,
+      listId: "source-list",
+      emptyId: "source-detail-empty",
+      formId: "source-detail-form",
+      createBtnId: "source-create-btn",
+      idPrefix: "source",
+      dataIdAttr: "sourceId",
+      selectedId: null,
+      allItems: () => allSources,
+      sensitiveFields: new Set(["email"]),
+      renderListMeta: (item) => esc(item.email || item.url) || "No email",
+    },
+  };
 
   function openBundleOverlay() {
     manageOverlay.classList.add("active");
@@ -1664,113 +1745,203 @@
   function switchEntityTab(tab, entityId) {
     currentEntityTab = tab;
 
-    // Update tab buttons
     document.querySelectorAll(".entity-tab").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.tab === tab);
     });
-
-    // Update content visibility
     document.querySelectorAll(".entity-tab-content").forEach((content) => {
       content.style.display = content.dataset.tabContent === tab ? "flex" : "none";
     });
 
-    // Load data for the tab, pre-selecting entity if provided
-    if (tab === "bundles") {
-      selectedBundleId = entityId || null;
-      renderBundleList().then(() => {
-        if (entityId) loadBundleDetail(entityId);
-      });
-      if (!entityId) showBundleDetailEmpty();
-    } else if (tab === "accounts") {
-      selectedAccountId = entityId || null;
-      renderAccountList().then(() => {
-        if (entityId) loadAccountDetail(entityId);
-      });
-      if (!entityId) showAccountDetailEmpty();
-    } else if (tab === "managers") {
-      selectedLicenseManagerId = entityId || null;
-      renderLicenseManagerList().then(() => {
-        if (entityId) loadLicenseManagerDetail(entityId);
-      });
-      if (!entityId) showLicenseManagerDetailEmpty();
-    } else if (tab === "sources") {
-      selectedSourceId = entityId || null;
-      renderSourceList().then(() => {
-        if (entityId) loadSourceDetail(entityId);
-      });
-      if (!entityId) showSourceDetailEmpty();
-    }
+    const cfg = MANAGE_CONFIGS[tab];
+    if (!cfg) return;
+    cfg.selectedId = entityId || null;
+    renderEntityMgmtList(cfg).then(() => {
+      if (entityId) loadEntityMgmtDetail(cfg, entityId);
+    });
+    if (!entityId) showEntityMgmtDetailEmpty(cfg);
   }
 
-  // Bundle list/detail
-  async function renderBundleList() {
-    await loadBundles();
-    const list = document.getElementById("bundle-list");
-    if (allBundles.length === 0) {
-      list.innerHTML = '<p class="no-data">No bundles yet</p>';
+  function renderEntityFormFieldsHtml(fields, entity, sensitiveFields) {
+    let html = '<div class="entity-form-fields">';
+    fields.forEach((f) => {
+      const inputType = (sensitiveFields.has(f.key) && privacyMode) ? "password" : "text";
+      const value = entity ? esc(entity[f.key] || "") : "";
+      html += '<div class="entity-form-field">';
+      html += `<label class="license-field__label">${f.label}${f.required ? " *" : ""}</label>`;
+      html += `<input type="${inputType}" class="license-input entity-field-input" data-field="${f.key}" value="${value}" placeholder="${f.placeholder || ""}" spellcheck="false">`;
+      html += "</div>";
+    });
+    html += "</div>";
+    return html;
+  }
+
+  function collectFormData(formEl) {
+    const data = {};
+    formEl.querySelectorAll(".entity-field-input").forEach((input) => {
+      data[input.dataset.field] = input.value;
+    });
+    return data;
+  }
+
+  async function renderEntityMgmtList(cfg) {
+    await cfg.reloadFn();
+    const list = document.getElementById(cfg.listId);
+    const items = cfg.allItems();
+    if (items.length === 0) {
+      list.innerHTML = `<p class="no-data">No ${cfg.label.toLowerCase()}s yet</p>`;
       return;
     }
     let html = "";
-    allBundles.forEach((bundle) => {
-      const active = bundle.id === selectedBundleId ? " entity-item--active" : "";
-      html += `<div class="entity-item${active}" data-bundle-id="${bundle.id}">`;
-      html += `<div class="entity-item__name">${esc(bundle.name)}</div>`;
-      html += `<div class="entity-item__meta">${esc(bundle.vendor)} &middot; ${bundle.product_count} products</div>`;
+    items.forEach((item) => {
+      const active = item.id === cfg.selectedId ? " entity-item--active" : "";
+      html += `<div class="entity-item${active}" data-entity-id="${item.id}">`;
+      html += `<div class="entity-item__name">${esc(item.name)}</div>`;
+      html += `<div class="entity-item__meta">${cfg.renderListMeta(item)}</div>`;
       html += "</div>";
     });
     list.innerHTML = html;
 
     list.querySelectorAll(".entity-item").forEach((el) => {
       el.addEventListener("click", () => {
-        selectedBundleId = parseInt(el.dataset.bundleId);
+        cfg.selectedId = parseInt(el.dataset.entityId);
         list.querySelectorAll(".entity-item").forEach((e) => e.classList.remove("entity-item--active"));
         el.classList.add("entity-item--active");
-        loadBundleDetail(selectedBundleId);
+        loadEntityMgmtDetail(cfg, cfg.selectedId);
       });
     });
   }
 
-  function showBundleDetailEmpty() {
-    document.getElementById("bundle-detail-empty").style.display = "";
-    document.getElementById("bundle-detail-form").style.display = "none";
+  function showEntityMgmtDetailEmpty(cfg) {
+    document.getElementById(cfg.emptyId).style.display = "";
+    document.getElementById(cfg.formId).style.display = "none";
   }
 
-  async function loadBundleDetail(bundleId) {
-    document.getElementById("bundle-detail-empty").style.display = "none";
-    const formEl = document.getElementById("bundle-detail-form");
+  async function loadEntityMgmtDetail(cfg, entityId) {
+    document.getElementById(cfg.emptyId).style.display = "none";
+    const formEl = document.getElementById(cfg.formId);
     formEl.style.display = "";
     formEl.innerHTML = '<p class="no-data">Loading...</p>';
 
     try {
-      const res = await fetch(`/api/bundles/${bundleId}`);
-      const bundle = await res.json();
-      renderBundleDetailForm(bundle);
+      const res = await fetch(`${cfg.apiEndpoint}/${entityId}`);
+      const entity = await res.json();
+      renderEntityMgmtDetailForm(cfg, entity);
     } catch {
-      formEl.innerHTML = '<p class="no-data">Failed to load bundle</p>';
+      formEl.innerHTML = `<p class="no-data">Failed to load ${cfg.label.toLowerCase()}</p>`;
     }
   }
 
-  function renderBundleDetailForm(bundle) {
-    const formEl = document.getElementById("bundle-detail-form");
+  function renderEntityMgmtDetailForm(cfg, entity) {
+    const formEl = document.getElementById(cfg.formId);
+    const prefix = cfg.idPrefix;
 
-    let html = '<div class="entity-form-fields">';
-    BUNDLE_FIELDS.forEach((f) => {
-      const inputType = (f.key === "serial_key" && privacyMode) ? "password" : "text";
-      html += '<div class="entity-form-field">';
-      html += `<label class="license-field__label">${f.label}${f.required ? " *" : ""}</label>`;
-      html += `<input type="${inputType}" class="license-input entity-field-input" data-field="${f.key}" value="${esc(bundle[f.key] || "")}" placeholder="${f.placeholder || ""}" spellcheck="false">`;
-      html += "</div>";
-    });
-    html += "</div>";
+    let html = renderEntityFormFieldsHtml(cfg.fields, entity, cfg.sensitiveFields);
 
     html += '<div class="entity-form-actions">';
-    html += '<button class="btn btn--accent" id="bundle-save-btn">Save</button>';
-    html += '<span class="status-saved" id="bundle-saved-msg">Saved</span>';
-    html += `<button class="btn btn--ghost btn--sm" id="bundle-delete-btn" style="margin-left: auto; color: #ef4444;">Delete Bundle</button>`;
+    html += `<button class="btn btn--accent" id="${prefix}-save-btn">Save</button>`;
+    html += `<span class="status-saved" id="${prefix}-saved-msg">Saved</span>`;
+    html += `<button class="btn btn--ghost btn--sm" id="${prefix}-delete-btn" style="margin-left: auto; color: #ef4444;">Delete ${cfg.label}</button>`;
     html += "</div>";
 
-    // Member products
-    html += '<div class="entity-members-section">';
+    if (cfg.renderDetailExtra) {
+      html += cfg.renderDetailExtra(entity);
+    }
+
+    formEl.innerHTML = html;
+
+    document.getElementById(`${prefix}-save-btn`).addEventListener("click", async () => {
+      const data = collectFormData(formEl);
+      if (!data.name || !data.name.trim()) {
+        toast("Name is required", "error");
+        return;
+      }
+      try {
+        const res = await fetch(`${cfg.apiEndpoint}/${entity.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        if (res.ok) {
+          const msg = document.getElementById(`${prefix}-saved-msg`);
+          msg.classList.add("show");
+          setTimeout(() => msg.classList.remove("show"), 2000);
+          toast(`${cfg.label} saved`, "success");
+          renderEntityMgmtList(cfg);
+        }
+      } catch {
+        toast("Network error", "error");
+      }
+    });
+
+    document.getElementById(`${prefix}-delete-btn`).addEventListener("click", async () => {
+      if (!confirm(`Delete ${cfg.label.toLowerCase()} "${entity.name}"? Products will be unlinked.`)) return;
+      try {
+        const res = await fetch(`${cfg.apiEndpoint}/${entity.id}`, { method: "DELETE" });
+        if (res.ok) {
+          toast(`${cfg.label} deleted`, "success");
+          cfg.selectedId = null;
+          await Promise.all([loadProducts(), renderEntityMgmtList(cfg)]);
+          showEntityMgmtDetailEmpty(cfg);
+        }
+      } catch {
+        toast("Network error", "error");
+      }
+    });
+
+    if (cfg.bindDetailExtra) {
+      cfg.bindDetailExtra(cfg, entity, formEl);
+    }
+  }
+
+  function initEntityMgmtCreate(cfg) {
+    document.getElementById(cfg.createBtnId).addEventListener("click", () => {
+      document.getElementById(cfg.emptyId).style.display = "none";
+      const formEl = document.getElementById(cfg.formId);
+      formEl.style.display = "";
+
+      let html = renderEntityFormFieldsHtml(cfg.fields, null, cfg.sensitiveFields);
+      html += '<div class="entity-form-actions">';
+      html += `<button class="btn btn--accent" id="${cfg.idPrefix}-create-save-btn">Create</button>`;
+      html += `<button class="btn btn--ghost btn--sm" id="${cfg.idPrefix}-create-cancel-btn" style="margin-left: 8px;">Cancel</button>`;
+      html += "</div>";
+
+      formEl.innerHTML = html;
+
+      document.getElementById(`${cfg.idPrefix}-create-save-btn`).addEventListener("click", async () => {
+        const data = collectFormData(formEl);
+        if (!data.name || !data.name.trim()) {
+          toast("Name is required", "error");
+          return;
+        }
+        try {
+          const res = await fetch(cfg.apiEndpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+          if (res.ok) {
+            const result = await res.json();
+            toast(`${cfg.label} created`, "success");
+            cfg.selectedId = result.id;
+            await renderEntityMgmtList(cfg);
+            loadEntityMgmtDetail(cfg, result.id);
+          }
+        } catch {
+          toast("Network error", "error");
+        }
+      });
+
+      document.getElementById(`${cfg.idPrefix}-create-cancel-btn`).addEventListener("click", () => {
+        showEntityMgmtDetailEmpty(cfg);
+      });
+
+      const nameInput = formEl.querySelector('[data-field="name"]');
+      if (nameInput) nameInput.focus();
+    });
+  }
+
+  function renderBundleMemberProducts(bundle) {
+    let html = '<div class="entity-members-section">';
     html += '<div class="drawer-section__title">Member Products</div>';
     if (bundle.products && bundle.products.length > 0) {
       html += '<div class="entity-member-list">';
@@ -1786,65 +1957,21 @@
       html += '<p class="no-data">No products in this bundle</p>';
     }
 
-    // Add products picker
     html += '<div class="entity-add-products">';
     html += '<input type="text" class="license-input" id="bundle-product-search" placeholder="Search products to add..." spellcheck="false">';
     html += '<div class="entity-search-results" id="bundle-search-results"></div>';
     html += "</div>";
-    html += "</div>"; // entity-members-section
+    html += "</div>";
+    return html;
+  }
 
-    formEl.innerHTML = html;
-
-    // Bind save
-    document.getElementById("bundle-save-btn").addEventListener("click", async () => {
-      const data = {};
-      formEl.querySelectorAll(".entity-field-input").forEach((input) => {
-        data[input.dataset.field] = input.value;
-      });
-      if (!data.name || !data.name.trim()) {
-        toast("Name is required", "error");
-        return;
-      }
-      try {
-        const res = await fetch(`/api/bundles/${bundle.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data),
-        });
-        if (res.ok) {
-          const msg = document.getElementById("bundle-saved-msg");
-          msg.classList.add("show");
-          setTimeout(() => msg.classList.remove("show"), 2000);
-          toast("Bundle saved", "success");
-          renderBundleList();
-        }
-      } catch {
-        toast("Network error", "error");
-      }
-    });
-
-    // Bind delete
-    document.getElementById("bundle-delete-btn").addEventListener("click", async () => {
-      if (!confirm(`Delete bundle "${bundle.name}"? Products will be unlinked.`)) return;
-      try {
-        const res = await fetch(`/api/bundles/${bundle.id}`, { method: "DELETE" });
-        if (res.ok) {
-          toast("Bundle deleted", "success");
-          selectedBundleId = null;
-          await Promise.all([loadProducts(), renderBundleList()]);
-          showBundleDetailEmpty();
-        }
-      } catch {
-        toast("Network error", "error");
-      }
-    });
-
-    // Bind remove product buttons
+  // Assigned as bindDetailExtra on the bundles config after definition
+  MANAGE_CONFIGS.bundles.bindDetailExtra = function (cfg, bundle, formEl) {
     formEl.querySelectorAll(".entity-remove-product").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const productId = parseInt(btn.dataset.productId);
         try {
-          const res = await fetch(`/api/products/bulk`, {
+          const res = await fetch("/api/products/bulk", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ product_ids: [productId], bundle_id: null }),
@@ -1852,8 +1979,8 @@
           if (res.ok) {
             toast("Product removed", "success");
             await loadProducts();
-            loadBundleDetail(bundle.id);
-            renderBundleList();
+            loadEntityMgmtDetail(cfg, bundle.id);
+            renderEntityMgmtList(cfg);
           }
         } catch {
           toast("Network error", "error");
@@ -1861,7 +1988,6 @@
       });
     });
 
-    // Bind product search
     const searchEl = document.getElementById("bundle-product-search");
     const resultsEl = document.getElementById("bundle-search-results");
     const memberIds = new Set((bundle.products || []).map((p) => p.id));
@@ -1895,7 +2021,7 @@
         el.querySelector("button").addEventListener("click", async () => {
           const productId = parseInt(el.dataset.productId);
           try {
-            const res = await fetch(`/api/products/bulk`, {
+            const res = await fetch("/api/products/bulk", {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ product_ids: [productId], bundle_id: bundle.id }),
@@ -1905,8 +2031,8 @@
               memberIds.add(productId);
               el.remove();
               await loadProducts();
-              loadBundleDetail(bundle.id);
-              renderBundleList();
+              loadEntityMgmtDetail(cfg, bundle.id);
+              renderEntityMgmtList(cfg);
             }
           } catch {
             toast("Network error", "error");
@@ -1914,580 +2040,7 @@
         });
       });
     });
-  }
-
-  function initCreateBundle() {
-    document.getElementById("bundle-create-btn").addEventListener("click", () => {
-      document.getElementById("bundle-detail-empty").style.display = "none";
-      const formEl = document.getElementById("bundle-detail-form");
-      formEl.style.display = "";
-
-      let html = '<div class="entity-form-fields">';
-      BUNDLE_FIELDS.forEach((f) => {
-        html += '<div class="entity-form-field">';
-        html += `<label class="license-field__label">${f.label}${f.required ? " *" : ""}</label>`;
-        html += `<input type="text" class="license-input entity-field-input" data-field="${f.key}" value="" placeholder="${f.placeholder || ""}" spellcheck="false">`;
-        html += "</div>";
-      });
-      html += "</div>";
-      html += '<div class="entity-form-actions">';
-      html += '<button class="btn btn--accent" id="bundle-create-save-btn">Create</button>';
-      html += '<button class="btn btn--ghost btn--sm" id="bundle-create-cancel-btn" style="margin-left: 8px;">Cancel</button>';
-      html += "</div>";
-
-      formEl.innerHTML = html;
-
-      document.getElementById("bundle-create-save-btn").addEventListener("click", async () => {
-        const data = {};
-        formEl.querySelectorAll(".entity-field-input").forEach((input) => {
-          data[input.dataset.field] = input.value;
-        });
-        if (!data.name || !data.name.trim()) {
-          toast("Name is required", "error");
-          return;
-        }
-        try {
-          const res = await fetch("/api/bundles", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data),
-          });
-          if (res.ok) {
-            const result = await res.json();
-            toast("Bundle created", "success");
-            selectedBundleId = result.id;
-            await renderBundleList();
-            loadBundleDetail(result.id);
-          }
-        } catch {
-          toast("Network error", "error");
-        }
-      });
-
-      document.getElementById("bundle-create-cancel-btn").addEventListener("click", () => {
-        showBundleDetailEmpty();
-      });
-
-      // Focus name field
-      const nameInput = formEl.querySelector('[data-field="name"]');
-      if (nameInput) nameInput.focus();
-    });
-  }
-
-  // Account list/detail
-  async function renderAccountList() {
-    await loadAccounts();
-    const list = document.getElementById("account-list");
-    if (allAccounts.length === 0) {
-      list.innerHTML = '<p class="no-data">No accounts yet</p>';
-      return;
-    }
-    let html = "";
-    allAccounts.forEach((account) => {
-      const active = account.id === selectedAccountId ? " entity-item--active" : "";
-      html += `<div class="entity-item${active}" data-account-id="${account.id}">`;
-      html += `<div class="entity-item__name">${esc(account.name)}</div>`;
-      html += `<div class="entity-item__meta">${esc(account.email) || "No email"}</div>`;
-      html += "</div>";
-    });
-    list.innerHTML = html;
-
-    list.querySelectorAll(".entity-item").forEach((el) => {
-      el.addEventListener("click", () => {
-        selectedAccountId = parseInt(el.dataset.accountId);
-        list.querySelectorAll(".entity-item").forEach((e) => e.classList.remove("entity-item--active"));
-        el.classList.add("entity-item--active");
-        loadAccountDetail(selectedAccountId);
-      });
-    });
-  }
-
-  function showAccountDetailEmpty() {
-    document.getElementById("account-detail-empty").style.display = "";
-    document.getElementById("account-detail-form").style.display = "none";
-  }
-
-  async function loadAccountDetail(accountId) {
-    document.getElementById("account-detail-empty").style.display = "none";
-    const formEl = document.getElementById("account-detail-form");
-    formEl.style.display = "";
-    formEl.innerHTML = '<p class="no-data">Loading...</p>';
-
-    try {
-      const res = await fetch(`/api/accounts/${accountId}`);
-      const account = await res.json();
-      renderAccountDetailForm(account);
-    } catch {
-      formEl.innerHTML = '<p class="no-data">Failed to load account</p>';
-    }
-  }
-
-  function renderAccountDetailForm(account) {
-    const formEl = document.getElementById("account-detail-form");
-
-    let html = '<div class="entity-form-fields">';
-    ACCOUNT_FIELDS.forEach((f) => {
-      const inputType = (f.key === "email" && privacyMode) ? "password" : "text";
-      html += '<div class="entity-form-field">';
-      html += `<label class="license-field__label">${f.label}${f.required ? " *" : ""}</label>`;
-      html += `<input type="${inputType}" class="license-input entity-field-input" data-field="${f.key}" value="${esc(account[f.key] || "")}" spellcheck="false">`;
-      html += "</div>";
-    });
-    html += "</div>";
-
-    html += '<div class="entity-form-actions">';
-    html += '<button class="btn btn--accent" id="account-save-btn">Save</button>';
-    html += '<span class="status-saved" id="account-saved-msg">Saved</span>';
-    html += `<button class="btn btn--ghost btn--sm" id="account-delete-btn" style="margin-left: auto; color: #ef4444;">Delete Account</button>`;
-    html += "</div>";
-
-    formEl.innerHTML = html;
-
-    // Bind save
-    document.getElementById("account-save-btn").addEventListener("click", async () => {
-      const data = {};
-      formEl.querySelectorAll(".entity-field-input").forEach((input) => {
-        data[input.dataset.field] = input.value;
-      });
-      if (!data.name || !data.name.trim()) {
-        toast("Name is required", "error");
-        return;
-      }
-      try {
-        const res = await fetch(`/api/accounts/${account.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data),
-        });
-        if (res.ok) {
-          const msg = document.getElementById("account-saved-msg");
-          msg.classList.add("show");
-          setTimeout(() => msg.classList.remove("show"), 2000);
-          toast("Account saved", "success");
-          renderAccountList();
-        }
-      } catch {
-        toast("Network error", "error");
-      }
-    });
-
-    // Bind delete
-    document.getElementById("account-delete-btn").addEventListener("click", async () => {
-      if (!confirm(`Delete account "${account.name}"? Products will be unlinked.`)) return;
-      try {
-        const res = await fetch(`/api/accounts/${account.id}`, { method: "DELETE" });
-        if (res.ok) {
-          toast("Account deleted", "success");
-          selectedAccountId = null;
-          await Promise.all([loadProducts(), renderAccountList()]);
-          showAccountDetailEmpty();
-        }
-      } catch {
-        toast("Network error", "error");
-      }
-    });
-  }
-
-  function initCreateAccount() {
-    document.getElementById("account-create-btn").addEventListener("click", () => {
-      document.getElementById("account-detail-empty").style.display = "none";
-      const formEl = document.getElementById("account-detail-form");
-      formEl.style.display = "";
-
-      let html = '<div class="entity-form-fields">';
-      ACCOUNT_FIELDS.forEach((f) => {
-        html += '<div class="entity-form-field">';
-        html += `<label class="license-field__label">${f.label}${f.required ? " *" : ""}</label>`;
-        html += `<input type="text" class="license-input entity-field-input" data-field="${f.key}" value="" spellcheck="false">`;
-        html += "</div>";
-      });
-      html += "</div>";
-      html += '<div class="entity-form-actions">';
-      html += '<button class="btn btn--accent" id="account-create-save-btn">Create</button>';
-      html += '<button class="btn btn--ghost btn--sm" id="account-create-cancel-btn" style="margin-left: 8px;">Cancel</button>';
-      html += "</div>";
-
-      formEl.innerHTML = html;
-
-      document.getElementById("account-create-save-btn").addEventListener("click", async () => {
-        const data = {};
-        formEl.querySelectorAll(".entity-field-input").forEach((input) => {
-          data[input.dataset.field] = input.value;
-        });
-        if (!data.name || !data.name.trim()) {
-          toast("Name is required", "error");
-          return;
-        }
-        try {
-          const res = await fetch("/api/accounts", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data),
-          });
-          if (res.ok) {
-            const result = await res.json();
-            toast("Account created", "success");
-            selectedAccountId = result.id;
-            await renderAccountList();
-            loadAccountDetail(result.id);
-          }
-        } catch {
-          toast("Network error", "error");
-        }
-      });
-
-      document.getElementById("account-create-cancel-btn").addEventListener("click", () => {
-        showAccountDetailEmpty();
-      });
-
-      // Focus name field
-      const nameInput = formEl.querySelector('[data-field="name"]');
-      if (nameInput) nameInput.focus();
-    });
-  }
-
-  // License Manager list/detail
-  async function renderLicenseManagerList() {
-    await loadLicenseManagers();
-    const list = document.getElementById("lm-list");
-    if (allLicenseManagers.length === 0) {
-      list.innerHTML = '<p class="no-data">No license managers yet</p>';
-      return;
-    }
-    let html = "";
-    allLicenseManagers.forEach((lm) => {
-      const active = lm.id === selectedLicenseManagerId ? " entity-item--active" : "";
-      html += `<div class="entity-item${active}" data-lm-id="${lm.id}">`;
-      html += `<div class="entity-item__name">${esc(lm.name)}</div>`;
-      html += `<div class="entity-item__meta">${esc(lm.url) || "No URL"}</div>`;
-      html += "</div>";
-    });
-    list.innerHTML = html;
-
-    list.querySelectorAll(".entity-item").forEach((el) => {
-      el.addEventListener("click", () => {
-        selectedLicenseManagerId = parseInt(el.dataset.lmId);
-        list.querySelectorAll(".entity-item").forEach((e) => e.classList.remove("entity-item--active"));
-        el.classList.add("entity-item--active");
-        loadLicenseManagerDetail(selectedLicenseManagerId);
-      });
-    });
-  }
-
-  function showLicenseManagerDetailEmpty() {
-    document.getElementById("lm-detail-empty").style.display = "";
-    document.getElementById("lm-detail-form").style.display = "none";
-  }
-
-  async function loadLicenseManagerDetail(lmId) {
-    document.getElementById("lm-detail-empty").style.display = "none";
-    const formEl = document.getElementById("lm-detail-form");
-    formEl.style.display = "";
-    formEl.innerHTML = '<p class="no-data">Loading...</p>';
-
-    try {
-      const res = await fetch(`/api/license-managers/${lmId}`);
-      const lm = await res.json();
-      renderLicenseManagerDetailForm(lm);
-    } catch {
-      formEl.innerHTML = '<p class="no-data">Failed to load license manager</p>';
-    }
-  }
-
-  function renderLicenseManagerDetailForm(lm) {
-    const formEl = document.getElementById("lm-detail-form");
-
-    let html = '<div class="entity-form-fields">';
-    LICENSE_MANAGER_FIELDS.forEach((f) => {
-      html += '<div class="entity-form-field">';
-      html += `<label class="license-field__label">${f.label}${f.required ? " *" : ""}</label>`;
-      html += `<input type="text" class="license-input entity-field-input" data-field="${f.key}" value="${esc(lm[f.key] || "")}" spellcheck="false">`;
-      html += "</div>";
-    });
-    html += "</div>";
-
-    html += '<div class="entity-form-actions">';
-    html += '<button class="btn btn--accent" id="lm-save-btn">Save</button>';
-    html += '<span class="status-saved" id="lm-saved-msg">Saved</span>';
-    html += `<button class="btn btn--ghost btn--sm" id="lm-delete-btn" style="margin-left: auto; color: #ef4444;">Delete License Manager</button>`;
-    html += "</div>";
-
-    formEl.innerHTML = html;
-
-    // Bind save
-    document.getElementById("lm-save-btn").addEventListener("click", async () => {
-      const data = {};
-      formEl.querySelectorAll(".entity-field-input").forEach((input) => {
-        data[input.dataset.field] = input.value;
-      });
-      if (!data.name || !data.name.trim()) {
-        toast("Name is required", "error");
-        return;
-      }
-      try {
-        const res = await fetch(`/api/license-managers/${lm.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data),
-        });
-        if (res.ok) {
-          const msg = document.getElementById("lm-saved-msg");
-          msg.classList.add("show");
-          setTimeout(() => msg.classList.remove("show"), 2000);
-          toast("License Manager saved", "success");
-          renderLicenseManagerList();
-        }
-      } catch {
-        toast("Network error", "error");
-      }
-    });
-
-    // Bind delete
-    document.getElementById("lm-delete-btn").addEventListener("click", async () => {
-      if (!confirm(`Delete license manager "${lm.name}"? Products will be unlinked.`)) return;
-      try {
-        const res = await fetch(`/api/license-managers/${lm.id}`, { method: "DELETE" });
-        if (res.ok) {
-          toast("License Manager deleted", "success");
-          selectedLicenseManagerId = null;
-          await Promise.all([loadProducts(), renderLicenseManagerList()]);
-          showLicenseManagerDetailEmpty();
-        }
-      } catch {
-        toast("Network error", "error");
-      }
-    });
-  }
-
-  function initCreateLicenseManager() {
-    document.getElementById("lm-create-btn").addEventListener("click", () => {
-      document.getElementById("lm-detail-empty").style.display = "none";
-      const formEl = document.getElementById("lm-detail-form");
-      formEl.style.display = "";
-
-      let html = '<div class="entity-form-fields">';
-      LICENSE_MANAGER_FIELDS.forEach((f) => {
-        html += '<div class="entity-form-field">';
-        html += `<label class="license-field__label">${f.label}${f.required ? " *" : ""}</label>`;
-        html += `<input type="text" class="license-input entity-field-input" data-field="${f.key}" value="" spellcheck="false">`;
-        html += "</div>";
-      });
-      html += "</div>";
-      html += '<div class="entity-form-actions">';
-      html += '<button class="btn btn--accent" id="lm-create-save-btn">Create</button>';
-      html += '<button class="btn btn--ghost btn--sm" id="lm-create-cancel-btn" style="margin-left: 8px;">Cancel</button>';
-      html += "</div>";
-
-      formEl.innerHTML = html;
-
-      document.getElementById("lm-create-save-btn").addEventListener("click", async () => {
-        const data = {};
-        formEl.querySelectorAll(".entity-field-input").forEach((input) => {
-          data[input.dataset.field] = input.value;
-        });
-        if (!data.name || !data.name.trim()) {
-          toast("Name is required", "error");
-          return;
-        }
-        try {
-          const res = await fetch("/api/license-managers", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data),
-          });
-          if (res.ok) {
-            const result = await res.json();
-            toast("License Manager created", "success");
-            selectedLicenseManagerId = result.id;
-            await renderLicenseManagerList();
-            loadLicenseManagerDetail(result.id);
-          }
-        } catch {
-          toast("Network error", "error");
-        }
-      });
-
-      document.getElementById("lm-create-cancel-btn").addEventListener("click", () => {
-        showLicenseManagerDetailEmpty();
-      });
-
-      // Focus name field
-      const nameInput = formEl.querySelector('[data-field="name"]');
-      if (nameInput) nameInput.focus();
-    });
-  }
-
-  // Source list/detail
-  async function renderSourceList() {
-    await loadSources();
-    const list = document.getElementById("source-list");
-    if (allSources.length === 0) {
-      list.innerHTML = '<p class="no-data">No sources yet</p>';
-      return;
-    }
-    let html = "";
-    allSources.forEach((source) => {
-      const active = source.id === selectedSourceId ? " entity-item--active" : "";
-      html += `<div class="entity-item${active}" data-source-id="${source.id}">`;
-      html += `<div class="entity-item__name">${esc(source.name)}</div>`;
-      html += `<div class="entity-item__meta">${esc(source.email || source.url) || "No email"}</div>`;
-      html += "</div>";
-    });
-    list.innerHTML = html;
-
-    list.querySelectorAll(".entity-item").forEach((el) => {
-      el.addEventListener("click", () => {
-        selectedSourceId = parseInt(el.dataset.sourceId);
-        list.querySelectorAll(".entity-item").forEach((e) => e.classList.remove("entity-item--active"));
-        el.classList.add("entity-item--active");
-        loadSourceDetail(selectedSourceId);
-      });
-    });
-  }
-
-  function showSourceDetailEmpty() {
-    document.getElementById("source-detail-empty").style.display = "";
-    document.getElementById("source-detail-form").style.display = "none";
-  }
-
-  async function loadSourceDetail(sourceId) {
-    document.getElementById("source-detail-empty").style.display = "none";
-    const formEl = document.getElementById("source-detail-form");
-    formEl.style.display = "";
-    formEl.innerHTML = '<p class="no-data">Loading...</p>';
-
-    try {
-      const res = await fetch(`/api/sources/${sourceId}`);
-      const source = await res.json();
-      renderSourceDetailForm(source);
-    } catch {
-      formEl.innerHTML = '<p class="no-data">Failed to load source</p>';
-    }
-  }
-
-  function renderSourceDetailForm(source) {
-    const formEl = document.getElementById("source-detail-form");
-
-    let html = '<div class="entity-form-fields">';
-    SOURCE_FIELDS.forEach((f) => {
-      const inputType = (f.key === "email" && privacyMode) ? "password" : "text";
-      html += '<div class="entity-form-field">';
-      html += `<label class="license-field__label">${f.label}${f.required ? " *" : ""}</label>`;
-      html += `<input type="${inputType}" class="license-input entity-field-input" data-field="${f.key}" value="${esc(source[f.key] || "")}" spellcheck="false">`;
-      html += "</div>";
-    });
-    html += "</div>";
-
-    html += '<div class="entity-form-actions">';
-    html += '<button class="btn btn--accent" id="source-save-btn">Save</button>';
-    html += '<span class="status-saved" id="source-saved-msg">Saved</span>';
-    html += `<button class="btn btn--ghost btn--sm" id="source-delete-btn" style="margin-left: auto; color: #ef4444;">Delete Source</button>`;
-    html += "</div>";
-
-    formEl.innerHTML = html;
-
-    // Bind save
-    document.getElementById("source-save-btn").addEventListener("click", async () => {
-      const data = {};
-      formEl.querySelectorAll(".entity-field-input").forEach((input) => {
-        data[input.dataset.field] = input.value;
-      });
-      if (!data.name || !data.name.trim()) {
-        toast("Name is required", "error");
-        return;
-      }
-      try {
-        const res = await fetch(`/api/sources/${source.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data),
-        });
-        if (res.ok) {
-          const msg = document.getElementById("source-saved-msg");
-          msg.classList.add("show");
-          setTimeout(() => msg.classList.remove("show"), 2000);
-          toast("Source saved", "success");
-          renderSourceList();
-        }
-      } catch {
-        toast("Network error", "error");
-      }
-    });
-
-    // Bind delete
-    document.getElementById("source-delete-btn").addEventListener("click", async () => {
-      if (!confirm(`Delete source "${source.name}"? Products will be unlinked.`)) return;
-      try {
-        const res = await fetch(`/api/sources/${source.id}`, { method: "DELETE" });
-        if (res.ok) {
-          toast("Source deleted", "success");
-          selectedSourceId = null;
-          await Promise.all([loadProducts(), renderSourceList()]);
-          showSourceDetailEmpty();
-        }
-      } catch {
-        toast("Network error", "error");
-      }
-    });
-  }
-
-  function initCreateSource() {
-    document.getElementById("source-create-btn").addEventListener("click", () => {
-      document.getElementById("source-detail-empty").style.display = "none";
-      const formEl = document.getElementById("source-detail-form");
-      formEl.style.display = "";
-
-      let html = '<div class="entity-form-fields">';
-      SOURCE_FIELDS.forEach((f) => {
-        html += '<div class="entity-form-field">';
-        html += `<label class="license-field__label">${f.label}${f.required ? " *" : ""}</label>`;
-        html += `<input type="text" class="license-input entity-field-input" data-field="${f.key}" value="" spellcheck="false">`;
-        html += "</div>";
-      });
-      html += "</div>";
-      html += '<div class="entity-form-actions">';
-      html += '<button class="btn btn--accent" id="source-create-save-btn">Create</button>';
-      html += '<button class="btn btn--ghost btn--sm" id="source-create-cancel-btn" style="margin-left: 8px;">Cancel</button>';
-      html += "</div>";
-
-      formEl.innerHTML = html;
-
-      document.getElementById("source-create-save-btn").addEventListener("click", async () => {
-        const data = {};
-        formEl.querySelectorAll(".entity-field-input").forEach((input) => {
-          data[input.dataset.field] = input.value;
-        });
-        if (!data.name || !data.name.trim()) {
-          toast("Name is required", "error");
-          return;
-        }
-        try {
-          const res = await fetch("/api/sources", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data),
-          });
-          if (res.ok) {
-            const result = await res.json();
-            toast("Source created", "success");
-            selectedSourceId = result.id;
-            await renderSourceList();
-            loadSourceDetail(result.id);
-          }
-        } catch {
-          toast("Network error", "error");
-        }
-      });
-
-      document.getElementById("source-create-cancel-btn").addEventListener("click", () => {
-        showSourceDetailEmpty();
-      });
-
-      // Focus name field
-      const nameInput = formEl.querySelector('[data-field="name"]');
-      if (nameInput) nameInput.focus();
-    });
-  }
+  };
 
   // ---- Create Product ----
 
@@ -2674,69 +2227,41 @@
       }
     });
 
-    const bulkBundleSelect = document.getElementById("bulk-bundle");
-    if (bulkBundleSelect) {
-      bulkBundleSelect.addEventListener("change", async (e) => {
-        const val = e.target.value;
-        if (!val) return;
-        e.target.value = "";
-        const isNone = val === "__none__";
-        const bundleId = isNone ? null : parseInt(val);
-        const ids = [...selectedProductIds];
-        try {
-          const res = await fetch("/api/products/bulk", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ product_ids: ids, bundle_id: bundleId }),
-          });
-          if (res.ok) {
-            const bundle = isNone ? null : allBundles.find((b) => b.id === bundleId);
-            ids.forEach((id) => {
-              const p = allProducts.find((p) => p.id === id);
-              if (p) {
-                p.bundle_id = bundleId;
-                p.bundle_name = bundle ? bundle.name : "";
-              }
-            });
-            applyFilters();
-            await loadBundles();
-            toast(isNone ? `Cleared bundle from ${ids.length} products` : `Assigned ${ids.length} products to bundle`, "success");
-          } else {
-            toast("Bulk update failed", "error");
-          }
-        } catch {
-          toast("Network error", "error");
-        }
-      });
-    }
+    const BULK_ASSIGN_CONFIGS = [
+      { elementId: "bulk-bundle", apiField: "bundle_id", idProp: "bundle_id", nameProp: "bundle_name", label: "bundle", allItems: () => allBundles, reloadFn: loadBundles },
+      { elementId: "bulk-account", apiField: "account_id", idProp: "account_id", nameProp: "account_name", label: "account", allItems: () => allAccounts, reloadFn: loadAccounts },
+      { elementId: "bulk-lm", apiField: "license_manager_id", idProp: "license_manager_id", nameProp: "license_manager_name", label: "license manager", allItems: () => allLicenseManagers, reloadFn: loadLicenseManagers },
+      { elementId: "bulk-source", apiField: "source_id", idProp: "source_id", nameProp: "source_name", label: "source", allItems: () => allSources, reloadFn: loadSources },
+    ];
 
-    const bulkAccountSelect = document.getElementById("bulk-account");
-    if (bulkAccountSelect) {
-      bulkAccountSelect.addEventListener("change", async (e) => {
+    BULK_ASSIGN_CONFIGS.forEach((cfg) => {
+      const sel = document.getElementById(cfg.elementId);
+      if (!sel) return;
+      sel.addEventListener("change", async (e) => {
         const val = e.target.value;
         if (!val) return;
         e.target.value = "";
         const isNone = val === "__none__";
-        const accountId = isNone ? null : parseInt(val);
+        const entityId = isNone ? null : parseInt(val);
         const ids = [...selectedProductIds];
         try {
           const res = await fetch("/api/products/bulk", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ product_ids: ids, account_id: accountId }),
+            body: JSON.stringify({ product_ids: ids, [cfg.apiField]: entityId }),
           });
           if (res.ok) {
-            const account = isNone ? null : allAccounts.find((a) => a.id === accountId);
+            const entity = isNone ? null : cfg.allItems().find((item) => item.id === entityId);
             ids.forEach((id) => {
               const p = allProducts.find((p) => p.id === id);
               if (p) {
-                p.account_id = accountId;
-                p.account_name = account ? account.name : "";
+                p[cfg.idProp] = entityId;
+                p[cfg.nameProp] = entity ? entity.name : "";
               }
             });
             applyFilters();
-            await loadAccounts();
-            toast(isNone ? `Cleared account from ${ids.length} products` : `Assigned ${ids.length} products to account`, "success");
+            await cfg.reloadFn();
+            toast(isNone ? `Cleared ${cfg.label} from ${ids.length} products` : `Assigned ${ids.length} products to ${cfg.label}`, "success");
           } else {
             toast("Bulk update failed", "error");
           }
@@ -2744,79 +2269,7 @@
           toast("Network error", "error");
         }
       });
-    }
-
-    const bulkLicenseManagerSelect = document.getElementById("bulk-lm");
-    if (bulkLicenseManagerSelect) {
-      bulkLicenseManagerSelect.addEventListener("change", async (e) => {
-        const val = e.target.value;
-        if (!val) return;
-        e.target.value = "";
-        const isNone = val === "__none__";
-        const lmId = isNone ? null : parseInt(val);
-        const ids = [...selectedProductIds];
-        try {
-          const res = await fetch("/api/products/bulk", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ product_ids: ids, license_manager_id: lmId }),
-          });
-          if (res.ok) {
-            const lm = isNone ? null : allLicenseManagers.find((lm) => lm.id === lmId);
-            ids.forEach((id) => {
-              const p = allProducts.find((p) => p.id === id);
-              if (p) {
-                p.license_manager_id = lmId;
-                p.license_manager_name = lm ? lm.name : "";
-              }
-            });
-            applyFilters();
-            await loadLicenseManagers();
-            toast(isNone ? `Cleared license manager from ${ids.length} products` : `Assigned ${ids.length} products to license manager`, "success");
-          } else {
-            toast("Bulk update failed", "error");
-          }
-        } catch {
-          toast("Network error", "error");
-        }
-      });
-    }
-
-    const bulkSourceSelect = document.getElementById("bulk-source");
-    if (bulkSourceSelect) {
-      bulkSourceSelect.addEventListener("change", async (e) => {
-        const val = e.target.value;
-        if (!val) return;
-        e.target.value = "";
-        const isNone = val === "__none__";
-        const sourceId = isNone ? null : parseInt(val);
-        const ids = [...selectedProductIds];
-        try {
-          const res = await fetch("/api/products/bulk", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ product_ids: ids, source_id: sourceId }),
-          });
-          if (res.ok) {
-            const source = isNone ? null : allSources.find((s) => s.id === sourceId);
-            ids.forEach((id) => {
-              const p = allProducts.find((p) => p.id === id);
-              if (p) {
-                p.source_id = sourceId;
-                p.source_name = source ? source.name : "";
-              }
-            });
-            applyFilters();
-            await loadSources();
-            toast(isNone ? `Cleared source from ${ids.length} products` : `Assigned ${ids.length} products to source`, "success");
-          } else {
-            toast("Bulk update failed", "error");
-          }
-        } catch {
-          toast("Network error", "error");
-        }
-      });
-    }
+    });
 
     // Merge (drawer + side panel)
     document.getElementById("bulk-merge").addEventListener("click", openMergeMode);
@@ -2873,10 +2326,7 @@
       });
     });
 
-    initCreateBundle();
-    initCreateAccount();
-    initCreateLicenseManager();
-    initCreateSource();
+    Object.values(MANAGE_CONFIGS).forEach((cfg) => initEntityMgmtCreate(cfg));
     initCreateProduct();
 
     // Keyboard shortcuts
@@ -3000,13 +2450,8 @@
     // Best status: prefer non-unknown
     const bestStatus = ordered.map((p) => p.status).find((s) => s && s !== "unknown") || primary.status;
 
-    // Concatenate installations and licenses from all products
-    const allInstallations = [];
-    const allLicenses = [];
-    ordered.forEach((p) => {
-      (p.installations || []).forEach((inst) => allInstallations.push(inst));
-      (p.licenses || []).forEach((lic) => allLicenses.push(lic));
-    });
+    const allInstallations = ordered.flatMap((p) => p.installations || []);
+    const allLicenses = ordered.flatMap((p) => p.licenses || []);
 
     // Deduplicated notes
     const allNotes = ordered.map((p) => (p.notes || "").trim()).filter(Boolean);
@@ -3140,6 +2585,11 @@
       toast("Cannot merge: preview data not ready", "error");
       return;
     }
+    const scannedCount = mergeProductDetails.filter((p) => (p.installations || []).length > 0).length;
+    if (scannedCount > 1) {
+      toast("Cannot merge: multiple scanned products", "error");
+      return;
+    }
     const primary = mergeProductDetails.find((p) => p.id === mergeKeepId);
     if (!primary) {
       toast("Cannot merge: primary product not found", "error");
@@ -3181,11 +2631,14 @@
         source_id: syn.source_id || null,
       };
 
-      await fetch(`/api/products/${mergeKeepId}`, {
+      const updateRes = await fetch(`/api/products/${mergeKeepId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
       });
+      if (!updateRes.ok) {
+        toast("Merge succeeded but failed to update product fields", "error");
+      }
 
       // 3. Refresh and clean up
       closeMergeMode();

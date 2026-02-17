@@ -334,32 +334,18 @@ def show(ctx: click.Context, name: str) -> None:
         db.close()
         return
 
-    bundle_name = None
-    if product.bundle_id:
-        bun = db.get_bundle(product.bundle_id)
-        bundle_name = bun.name if bun else None
-
-    account_name = None
-    if product.account_id:
-        acct = db.get_account(product.account_id)
-        account_name = acct.name if acct else None
-
-    manager_name = None
-    if product.license_manager_id:
-        mgr = db.get_license_manager(product.license_manager_id)
-        manager_name = mgr.name if mgr else None
-
-    source_name = None
-    if product.source_id:
-        src = db.get_source(product.source_id)
-        source_name = src.name if src else None
+    def _resolve_name(entity_id, getter):
+        if not entity_id:
+            return None
+        entity = getter(entity_id)
+        return entity.name if entity else None
 
     _display_product(
         product,
-        bundle_name=bundle_name,
-        account_name=account_name,
-        manager_name=manager_name,
-        source_name=source_name,
+        bundle_name=_resolve_name(product.bundle_id, db.get_bundle),
+        account_name=_resolve_name(product.account_id, db.get_account),
+        manager_name=_resolve_name(product.license_manager_id, db.get_license_manager),
+        source_name=_resolve_name(product.source_id, db.get_source),
     )
     db.close()
 
@@ -372,7 +358,7 @@ def _display_product(
     source_name: str | None = None,
 ) -> None:
     """Render full product details."""
-    title = f"{product.name}"
+    title = product.name
     if product.vendor:
         title += f"  by {product.vendor}"
 
@@ -757,7 +743,7 @@ def bundle_show(ctx: click.Context, name: str) -> None:
         db.close()
         return
 
-    title = f"{bun.name}"
+    title = bun.name
     if bun.vendor:
         title += f"  by {bun.vendor}"
 
@@ -926,7 +912,7 @@ def account_show(ctx: click.Context, name: str) -> None:
         db.close()
         return
 
-    title = f"{acct.name}"
+    title = acct.name
 
     lines: list[str] = []
     if acct.email:
@@ -1052,7 +1038,7 @@ def manager_show(ctx: click.Context, name: str) -> None:
         db.close()
         return
 
-    title = f"{mgr.name}"
+    title = mgr.name
 
     lines: list[str] = []
     if mgr.url:
@@ -1181,7 +1167,7 @@ def source_show(ctx: click.Context, name: str) -> None:
         db.close()
         return
 
-    title = f"{src.name}"
+    title = src.name
 
     lines: list[str] = []
     if src.email:

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import os
 import shutil
 import tempfile
+from collections.abc import Generator
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -58,6 +60,7 @@ class Database:
     def __init__(self, data_path: Path = DEFAULT_DATA_PATH):
         self.data_path = data_path
         self.data_path.parent.mkdir(parents=True, exist_ok=True)
+        self._batch = 0
         self._load()
 
     def _load(self) -> None:
@@ -212,7 +215,8 @@ class Database:
             self._save()
 
     def _save(self) -> None:
-        self._rotate_backups()
+        if self._batch > 0:
+            return
         fd, tmp = tempfile.mkstemp(
             dir=str(self.data_path.parent), suffix=".tmp"
         )
@@ -220,6 +224,7 @@ class Database:
             with os.fdopen(fd, "w") as f:
                 json.dump(self._data, f, indent=2, ensure_ascii=False)
                 f.write("\n")
+            self._rotate_backups()
             os.replace(tmp, str(self.data_path))
         except BaseException:
             try:
@@ -250,6 +255,17 @@ class Database:
 
     def close(self) -> None:
         pass
+
+    @contextlib.contextmanager
+    def batch(self) -> Generator[None]:
+        """Context manager that defers saves until the batch completes."""
+        self._batch += 1
+        try:
+            yield
+        finally:
+            self._batch -= 1
+            if self._batch == 0:
+                self._save()
 
     # --- Products ---
 
@@ -436,94 +452,62 @@ class Database:
         """Return the set of all product IDs."""
         return {int(pid) for pid in self._data["products"]}
 
-    def set_product_bundle(self, product_id: int, bundle_id: int | None) -> None:
-        """Assign or unlink a product from a bundle."""
-        p = self._data["products"].get(str(product_id))
-        if not p:
-            return
-        p["bundle_id"] = bundle_id
-        p["updated_at"] = _now()
+    def _set_product_field(
+        self, product_ids: list[int], field: str, value: int | None
+    ) -> None:
+        """Set a field on one or more products and save."""
+        now = _now()
+        for pid in product_ids:
+            p = self._data["products"].get(str(pid))
+            if p:
+                p[field] = value
+                p["updated_at"] = now
         self._save()
+
+    def _get_products_by_field(self, field: str, value: int) -> list[Product]:
+        """List products where a given field matches value, sorted by name."""
+        results = [
+            self._dict_to_product(int(pid_str), p)
+            for pid_str, p in self._data["products"].items()
+            if p.get(field) == value
+        ]
+        results.sort(key=lambda x: x.name)
+        return results
+
+    def set_product_bundle(self, product_id: int, bundle_id: int | None) -> None:
+        self._set_product_field([product_id], "bundle_id", bundle_id)
 
     def batch_set_product_bundle(
         self, product_ids: list[int], bundle_id: int | None
     ) -> None:
-        """Assign or unlink many products from a bundle in a single save."""
-        for pid in product_ids:
-            p = self._data["products"].get(str(pid))
-            if p:
-                p["bundle_id"] = bundle_id
-                p["updated_at"] = _now()
-        self._save()
+        self._set_product_field(product_ids, "bundle_id", bundle_id)
 
     def set_product_account(self, product_id: int, account_id: int | None) -> None:
-        """Assign or unlink a product from an account."""
-        p = self._data["products"].get(str(product_id))
-        if not p:
-            return
-        p["account_id"] = account_id
-        p["updated_at"] = _now()
-        self._save()
+        self._set_product_field([product_id], "account_id", account_id)
 
     def batch_set_product_account(
         self, product_ids: list[int], account_id: int | None
     ) -> None:
-        """Assign or unlink many products from an account in a single save."""
-        for pid in product_ids:
-            p = self._data["products"].get(str(pid))
-            if p:
-                p["account_id"] = account_id
-                p["updated_at"] = _now()
-        self._save()
+        self._set_product_field(product_ids, "account_id", account_id)
 
     def set_product_license_manager(
         self, product_id: int, license_manager_id: int | None
     ) -> None:
-        """Assign or unlink a product from a license manager."""
-        p = self._data["products"].get(str(product_id))
-        if not p:
-            return
-        p["license_manager_id"] = license_manager_id
-        p["updated_at"] = _now()
-        self._save()
+        self._set_product_field([product_id], "license_manager_id", license_manager_id)
 
     def batch_set_product_license_manager(
         self, product_ids: list[int], license_manager_id: int | None
     ) -> None:
-        """Assign or unlink many products from a license manager in a single save."""
-        for pid in product_ids:
-            p = self._data["products"].get(str(pid))
-            if p:
-                p["license_manager_id"] = license_manager_id
-                p["updated_at"] = _now()
-        self._save()
+        self._set_product_field(product_ids, "license_manager_id", license_manager_id)
 
     def get_products_for_bundle(self, bundle_id: int) -> list[Product]:
-        """List products belonging to a bundle."""
-        results = []
-        for pid_str, p in self._data["products"].items():
-            if p.get("bundle_id") == bundle_id:
-                results.append(self._dict_to_product(int(pid_str), p))
-        results.sort(key=lambda x: x.name)
-        return results
+        return self._get_products_by_field("bundle_id", bundle_id)
 
     def get_products_for_account(self, account_id: int) -> list[Product]:
-        """List products belonging to an account."""
-        results = []
-        for pid_str, p in self._data["products"].items():
-            if p.get("account_id") == account_id:
-                results.append(self._dict_to_product(int(pid_str), p))
-        results.sort(key=lambda x: x.name)
-        return results
+        return self._get_products_by_field("account_id", account_id)
 
     def get_products_for_license_manager(self, lm_id: int) -> list[Product]:
-        """List products using a license manager."""
-        results = []
-        for pid_str, p in self._data["products"].items():
-            if p.get("license_manager_id") == lm_id:
-                results.append(self._dict_to_product(int(pid_str), p))
-        results.sort(key=lambda x: x.name)
-        return results
+        return self._get_products_by_field("license_manager_id", lm_id)
 
     # --- Installations ---
 
@@ -1003,33 +987,15 @@ class Database:
         return True
 
     def set_product_source(self, product_id: int, source_id: int | None) -> None:
-        """Assign or unlink a product from a source."""
-        p = self._data["products"].get(str(product_id))
-        if not p:
-            return
-        p["source_id"] = source_id
-        p["updated_at"] = _now()
-        self._save()
+        self._set_product_field([product_id], "source_id", source_id)
 
     def batch_set_product_source(
         self, product_ids: list[int], source_id: int | None
     ) -> None:
-        """Assign or unlink many products from a source in a single save."""
-        for pid in product_ids:
-            p = self._data["products"].get(str(pid))
-            if p:
-                p["source_id"] = source_id
-                p["updated_at"] = _now()
-        self._save()
+        self._set_product_field(product_ids, "source_id", source_id)
 
     def get_products_for_source(self, source_id: int) -> list[Product]:
-        """List products belonging to a source."""
-        results = []
-        for pid_str, p in self._data["products"].items():
-            if p.get("source_id") == source_id:
-                results.append(self._dict_to_product(int(pid_str), p))
-        results.sort(key=lambda x: x.name)
-        return results
+        return self._get_products_by_field("source_id", source_id)
 
     # --- Scans ---
 

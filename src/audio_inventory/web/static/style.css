@@ -356,6 +356,7 @@ body {
 
 .filter-bar__selects select:focus {
   border-color: var(--accent-dim);
+  box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
 .filter-bar__selects select.active {
@@ -607,6 +608,8 @@ tbody td {
   font-weight: 600;
   text-transform: lowercase;
   border-radius: 9999px;
+  cursor: pointer;
+  transition: opacity 0.15s;
 }
 
 .status-licensed     { color: var(--status-licensed);     background: rgba(52, 210, 123, 0.12); }
@@ -783,6 +786,12 @@ tbody td {
   background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%235c5c6a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 8px center;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.status-select-wrap select:focus {
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
 .status-select-wrap .btn-save {
@@ -862,15 +871,6 @@ tbody td {
   line-height: 1.6;
 }
 
-/* License info */
-.license-entry {
-  background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--space-sm) var(--space-md);
-  margin-bottom: var(--space-sm);
-}
-
 .license-field {
   display: flex;
   gap: var(--space-sm);
@@ -923,7 +923,7 @@ tbody td {
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: var(--space-xl) var(--space-xl);
+  padding: var(--space-xl);
   text-align: center;
   box-shadow: 0 20px 60px var(--shadow-overlay);
 }
@@ -980,16 +980,17 @@ tbody td {
 .toast.error   { border-color: #ef4444; }
 
 /* ============================================================
-   Responsive
+   Light mode overrides
    ============================================================ */
 
-[data-theme="light"] .filter-bar__selects select {
-  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238888a0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-}
-
+[data-theme="light"] .filter-bar__selects select,
 [data-theme="light"] .status-select-wrap select {
   background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238888a0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
+
+/* ============================================================
+   Responsive
+   ============================================================ */
 
 @media (max-width: 900px) {
   .filter-bar {
@@ -1035,24 +1036,11 @@ tbody td {
   border-color: var(--text-muted);
 }
 
-.theme-toggle .icon-sun,
-.theme-toggle .icon-moon {
-  display: none;
-}
-
-/* Show sun in dark mode (click to switch to light) */
-.theme-toggle .icon-sun { display: block; }
 .theme-toggle .icon-moon { display: none; }
 
 [data-theme="light"] .theme-toggle .icon-sun { display: none; }
 [data-theme="light"] .theme-toggle .icon-moon { display: block; }
 
-/* Privacy toggle — show eye by default, eye-off when active */
-#privacy-toggle .icon-eye,
-#privacy-toggle .icon-eye-off {
-  display: none;
-}
-#privacy-toggle .icon-eye { display: block; }
 #privacy-toggle .icon-eye-off { display: none; }
 
 #privacy-toggle.active .icon-eye { display: none; }
@@ -1078,30 +1066,6 @@ tbody td {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
-}
-
-/* ============================================================
-   Package badge (table column)
-   ============================================================ */
-
-.cell-package {
-  font-size: 12px;
-}
-
-.pkg-badge {
-  display: inline-block;
-  padding: 2px 8px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 500;
-  border-radius: 9999px;
-  background: var(--accent-glow);
-  color: var(--accent);
-  border: 1px solid rgba(232, 168, 50, 0.2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
 }
 
 /* ============================================================
@@ -1516,14 +1480,7 @@ tbody td {
 .btn--accent {
   background: var(--accent);
   color: var(--bg-root);
-  border: none;
-  padding: 7px 14px;
-  font-family: var(--font-display);
-  font-size: 13px;
   font-weight: 600;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: background 0.15s;
 }
 
 .btn--accent:hover {
@@ -2043,12 +2000,6 @@ tbody td {
   background: var(--accent-dim);
 }
 
-/* Make status pills always clickable (even unknown) */
-.status-pill {
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-
 .status-pill:hover {
   opacity: 0.8;
 }
@@ -2202,8 +2153,6 @@ tbody td {
   border-bottom: 2px solid var(--bg-surface);
 }
 
-/* Column widths adjusted for checkbox — see main column defs above */
-
 .bulk-bar {
   display: flex;
   align-items: center;
@@ -2263,7 +2212,6 @@ tbody td {
   text-decoration: line-through;
   opacity: 0.5;
 }
-
 
 /* ============================================================
    Merge Panel (slides in to the left of the drawer)

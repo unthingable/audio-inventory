@@ -279,15 +279,15 @@
       <div style="padding:var(--space-lg)">
         <div class="entity-form-fields" id="create-product-form">
           <div class="entity-form-field">
-            <label class="license-field__label">Name *</label>
+            <label class="license-field__label" for="cp-name">Name *</label>
             <input type="text" class="license-input" id="cp-name" placeholder="Plugin name" spellcheck="false">
           </div>
           <div class="entity-form-field">
-            <label class="license-field__label">Vendor</label>
+            <label class="license-field__label" for="cp-vendor">Vendor</label>
             <input type="text" class="license-input" id="cp-vendor" placeholder="Vendor name" spellcheck="false">
           </div>
           <div class="entity-form-field">
-            <label class="license-field__label">Category</label>
+            <label class="license-field__label" for="cp-category">Category</label>
             <select class="license-input" id="cp-category" style="appearance:auto">
               <option value="">--</option>
               <option value="instrument">instrument</option>
@@ -301,7 +301,7 @@
             </select>
           </div>
           <div class="entity-form-field">
-            <label class="license-field__label">Status</label>
+            <label class="license-field__label" for="cp-status">Status</label>
             <select class="license-input" id="cp-status" style="appearance:auto">
               <option value="unknown">unknown</option>
               <option value="licensed">licensed</option>
@@ -313,7 +313,7 @@
           </div>
         </div>
         <div class="entity-form-actions">
-          <button class="btn--accent btn--sm" id="cp-submit">Create</button>
+          <button class="btn btn--accent btn--sm" id="cp-submit">Create</button>
           <button class="btn btn--ghost btn--sm" id="cp-cancel">Cancel</button>
         </div>
       </div>
@@ -341,7 +341,7 @@
         Non-primary products will be deleted. Installations and licenses transfer to the primary.
       </div>
       <div class="merge-panel__actions">
-        <button class="btn--accent btn--sm" id="merge-panel-confirm" disabled>Merge</button>
+        <button class="btn btn--accent btn--sm" id="merge-panel-confirm" disabled>Merge</button>
         <button class="btn btn--ghost btn--sm" id="merge-panel-cancel">Cancel</button>
       </div>
     </div>

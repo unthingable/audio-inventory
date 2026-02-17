@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 from pathlib import Path
 
@@ -323,9 +324,6 @@ def _normalize_vendor(vendor: str | None) -> str | None:
     if not vendor:
         return None
 
-    # Strip common legal suffixes before lookup
-    import re
-
     cleaned = re.sub(
         r"\s*(?:,?\s*(?:Inc|LLC|Ltd|GmbH|Co|Corp|S\.?A\.?S?|B\.?V\.?|Pty))\.?\s*$",
         "",
@@ -353,8 +351,6 @@ def _vendor_from_copyright(copyright_str: str) -> str | None:
         "Copyright 2025 UVI" -> "UVI"
         "Diva 1.4.8 (c) 2011-2024 Heckmann Audio GmbH u-he.com" -> "Heckmann Audio GmbH"
     """
-    import re
-
     # Pattern: (c) or Copyright YEAR(s) COMPANY_NAME
     m = re.search(
         r"(?:copyright|\(c\)|©)\s*\d{4}(?:\s*[-–]\s*\d{4})?\s+(.+?)(?:\s+all\s+rights|$)",

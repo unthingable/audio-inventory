@@ -94,11 +94,7 @@ def pick_best_name(group: list[ScannedPlugin]) -> str:
 
 def pick_best_vendor(group: list[ScannedPlugin]) -> str | None:
     """Pick the best vendor from a group, preferring AU > moduleinfo > bundle ID."""
-    vendors: list[str] = []
-    for p in group:
-        if p.vendor:
-            vendors.append(p.vendor)
-
+    vendors = [p.vendor for p in group if p.vendor]
     if not vendors:
         return None
 

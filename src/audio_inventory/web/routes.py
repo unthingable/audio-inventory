@@ -285,11 +285,12 @@ def api_merge_products():
     """Merge two products (remove into keep)."""
     db = _get_db()
     body = request.get_json(force=True)
-    keep_id = body.get("keep_id")
-    remove_id = body.get("remove_id")
-    if not keep_id or not remove_id:
+    try:
+        keep_id = int(body.get("keep_id"))
+        remove_id = int(body.get("remove_id"))
+    except (TypeError, ValueError):
         db.close()
-        return jsonify({"error": "keep_id and remove_id are required"}), 400
+        return jsonify({"error": "keep_id and remove_id are required as integers"}), 400
     if not db.merge_products(keep_id, remove_id):
         db.close()
         return jsonify({"error": "one or both products not found"}), 404
@@ -302,10 +303,15 @@ def api_bulk_update_products():
     """Bulk update products (status, bundle, account, license manager assignment)."""
     db = _get_db()
     body = request.get_json(force=True)
-    product_ids = body.get("product_ids", [])
-    if not product_ids:
+    raw_ids = body.get("product_ids", [])
+    if not isinstance(raw_ids, list) or not raw_ids:
         db.close()
-        return jsonify({"error": "product_ids is required"}), 400
+        return jsonify({"error": "product_ids must be a non-empty list of integers"}), 400
+    try:
+        product_ids = [int(pid) for pid in raw_ids]
+    except (TypeError, ValueError):
+        db.close()
+        return jsonify({"error": "product_ids must be a non-empty list of integers"}), 400
 
     if "status" in body:
         if body["status"] not in VALID_STATUSES:
@@ -883,28 +889,29 @@ def api_scan():
     existing_ids = db.get_all_product_ids()
 
     seen_product_ids: set[int] = set()
-    for group in groups:
-        name = pick_best_name(group)
-        vendor = pick_best_vendor(group)
-        category = infer_category(group)
+    with db.batch():
+        for group in groups:
+            name = pick_best_name(group)
+            vendor = pick_best_vendor(group)
+            category = infer_category(group)
 
-        product_id = db.upsert_product(name, vendor, category)
-        seen_product_ids.add(product_id)
+            product_id = db.upsert_product(name, vendor, category)
+            seen_product_ids.add(product_id)
 
-        for plugin in group:
-            db.upsert_installation(
-                product_id=product_id,
-                fmt=plugin.format,
-                path=str(plugin.path),
-                bundle_id=plugin.bundle_id,
-                version=plugin.version,
-                au_type=plugin.au_type,
-                au_subtype=plugin.au_subtype,
-                au_manufacturer=plugin.au_manufacturer,
-                vendor_from_plist=plugin.vendor,
-                copyright_str=plugin.copyright,
-                min_macos_version=plugin.min_macos_version,
-            )
+            for plugin in group:
+                db.upsert_installation(
+                    product_id=product_id,
+                    fmt=plugin.format,
+                    path=str(plugin.path),
+                    bundle_id=plugin.bundle_id,
+                    version=plugin.version,
+                    au_type=plugin.au_type,
+                    au_subtype=plugin.au_subtype,
+                    au_manufacturer=plugin.au_manufacturer,
+                    vendor_from_plist=plugin.vendor,
+                    copyright_str=plugin.copyright,
+                    min_macos_version=plugin.min_macos_version,
+                )
 
     new_products = len(seen_product_ids - existing_ids)
     removed = db.count_absent()
@@ -938,25 +945,25 @@ def api_export(fmt: str):
 
     db = _get_db()
 
-    if fmt == "json":
-        data = export_json(db)
-        db.close()
-        return current_app.response_class(
-            data,
-            mimetype="application/json",
-            headers={"Content-Disposition": "attachment; filename=inventory.json"},
-        )
-    elif fmt == "csv":
-        data = export_csv(db)
-        db.close()
-        return current_app.response_class(
-            data,
-            mimetype="text/csv",
-            headers={"Content-Disposition": "attachment; filename=inventory.csv"},
-        )
-    else:
+    if fmt not in ("json", "csv"):
         db.close()
         return jsonify({"error": "format must be json or csv"}), 400
+
+    if fmt == "json":
+        data = export_json(db)
+        mimetype = "application/json"
+        filename = "inventory.json"
+    else:
+        data = export_csv(db)
+        mimetype = "text/csv"
+        filename = "inventory.csv"
+
+    db.close()
+    return current_app.response_class(
+        data,
+        mimetype=mimetype,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @bp.route("/api/status")
